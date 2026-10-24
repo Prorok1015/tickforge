@@ -52,7 +52,7 @@ generated value if VS adds a path suffix.
 {
   "type": "cppgdb",
   "name": "tickforge WSL live",
-  "project": "CMakeLists.txt",
+  "project": "src/app/CMakeLists.txt",
   "projectTarget": "tickforge",
   "debuggerConfiguration": "gdb",
   "program": "${debugInfo.fullTargetPath}",
@@ -66,6 +66,19 @@ to keep recordings visible from both Windows and WSL, even when VS builds a copy
 of the source inside the Linux filesystem. Create `recordings/` under that working
 directory. Choose a new output filename for each run: existing recordings are not
 overwritten. Use F5 to debug, or Ctrl+F5 to run without debugging.
+
+If VS generates a generic configuration named `CMakeLists.txt` with an empty
+`projectTarget`, it has created a template rather than selected the executable.
+The target here is `tickforge`, declared in `src/app/CMakeLists.txt`.
+
+If `${debugInfo.fullTargetPath}` still cannot be evaluated, a machine-local startup
+item can explicitly set `program` to the verified Linux binary and
+`remoteMachineName` to the existing WSL connection name (for example `WSL: Ubuntu`).
+For the default VS source-copy location, a personal preset may produce a path such
+as `/home/<user>/.vs/tickforge/out/build/wsl-live-local/tickforge`. Check that this
+file exists in WSL first; do not copy a Windows `.exe` path or assume this location
+matches another preset. This explicit path is tied to that local build and must be
+updated if its preset/source-copy directory changes.
 
 With the native WSL2 toolset, Visual Studio normally copies source into the Linux
 filesystem. Do not assume the Linux build and the Windows checkout share the same
