@@ -1,0 +1,4 @@
+add_executable(accounting_tests accounting_tests.cpp)
+target_link_libraries(accounting_tests PRIVATE tickforge_accounting)
+tickforge_enable_warnings(accounting_tests)
+add_test(NAME accounting_contract COMMAND accounting_tests)

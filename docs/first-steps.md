@@ -36,12 +36,14 @@ Do not depend on live APIs in tests.
    sequencing, stale-depth detection, bounded reconnects, and fresh snapshots.
    Receipt order is preserved through capture/replay. Trade capture is still planned.
    See [live capture](live-capture.md).
-5. **First paper experiment:** strategy and execution interfaces, market orders
-   consuming bid/ask depth, partial fills, explicit fees, cash/position/PnL,
-   order/position/loss limits, stale-data stop, journal and report.
+5. **First paper experiment (partially implemented):** scripted market requests,
+   execution interface/simulator, depth consumption, partial fills, explicit fees,
+   a separate cash/BTC/reservation ledger, order/position limits, stale-data stop,
+   and a console journal. See [paper trading](paper-trading.md). Automatic strategy,
+   cost basis/PnL, daily-loss limits, and machine-readable journal export remain planned.
 6. **Reproducible Linux delivery:** CI, synthetic end-to-end example, then profiling.
 
-Steps 5 onward are planned. Each step should finish with relevant tests and updated
+The remaining parts of step 5 and step 6 are planned. Each step should finish with relevant tests and updated
 documentation before the next one begins. No real execution adapter is included.
 
 ## Selected venue

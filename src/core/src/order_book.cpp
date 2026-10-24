@@ -108,4 +108,21 @@ std::optional<std::int64_t> OrderBook::spread_atoms() const
     if (!bid || !ask) return std::nullopt;
     return ask->price_atoms - bid->price_atoms;
 }
+
+std::vector<Level> OrderBook::bid_depth() const
+{
+    std::vector<Level> result;
+    if (synchronized_)
+        for (auto level = bids_.rbegin(); level != bids_.rend(); ++level)
+            result.push_back({level->first, level->second});
+    return result;
+}
+
+std::vector<Level> OrderBook::ask_depth() const
+{
+    std::vector<Level> result;
+    if (synchronized_)
+        for (const auto& [price, quantity] : asks_) result.push_back({price, quantity});
+    return result;
+}
 } // namespace tickforge

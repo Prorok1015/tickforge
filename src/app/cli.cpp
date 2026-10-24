@@ -14,8 +14,9 @@ void usage(std::string_view program, std::FILE* stream = stdout)
 {
     write_console(std::format(
         "Usage     | {} replay SESSION\n"
+        "Paper     | {} paper SESSION SCENARIO\n"
         "Capture   | {} capture NEW_SESSION [SECONDS] (requires live-enabled build)\n",
-        program, program), stream);
+        program, program, program), stream);
 }
 
 unsigned duration(std::string_view text)
@@ -38,6 +39,8 @@ int dispatch(int argc, char* argv[])
         replay_session(argv[2]);
     } else if (std::string_view(argv[1]) == "capture" && (argc == 3 || argc == 4)) {
         capture_session(argv[2], argc == 4 ? duration(argv[3]) : 30);
+    } else if (std::string_view(argv[1]) == "paper" && argc == 4) {
+        paper_session(argv[2], argv[3]);
     } else {
         usage(program, stderr);
         return 2;

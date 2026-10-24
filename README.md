@@ -4,7 +4,7 @@ A C++ trading research engine for Linux with live market data, paper trading, an
 
 ## Status
 
-**Public depth capture and deterministic replay.** The C++20 CLI optionally connects to Binance Spot BTCUSDT public depth, synchronizes a local book, and records normalized sessions for offline replay. Gaps, reconnects, stale depth, and snapshot bridging invalidate/hide quotes when needed. Strategy, execution, accounting, and live trade capture remain planned.
+**Offline paper trading and public depth capture.** The C++20 CLI replays market sessions and executes scripted virtual market orders against known depth. A separate ledger tracks USDT/BTC totals, reservations, fills, and fees. Optional Binance public-depth capture records sessions and recovers a local book. Automatic strategies, PnL, real execution, and live trade capture remain planned.
 
 ## Why tickforge?
 
@@ -18,7 +18,7 @@ The project also serves as an engineering portfolio: correctness, recovery from 
 
 Start with one venue, one instrument, and a command-line application.
 
-Planned capabilities:
+Target capabilities (see the checked roadmap for implemented parts):
 
 - Receive live quotes, trades, and order book updates through a public market data feed.
 - Record market events and replay sessions offline.
@@ -77,6 +77,10 @@ Simulation realism will be developed incrementally:
 | Latency | Submission and cancellation take effect after a modeled delay. |
 | Limit orders | Fill estimates account for queue position using documented assumptions supported by the available feed. |
 
+The current [paper command](docs/paper-trading.md) implements immediate market fills
+across known depth, partial execution, configurable USDT fees, and virtual liquidity
+depletion. Latency and limit-order stages remain planned.
+
 A trade occurring at a limit order's price does not by itself prove that the simulated order would have filled.
 
 Public feeds may not expose enough information to reconstruct queue position precisely. Virtual orders also do not affect the real market. Results must therefore be interpreted within the chosen execution model.
@@ -110,17 +114,20 @@ Checked items below are implemented; unchecked items remain planned.
 - [x] Replay a versioned synthetic trade session through a synchronous event handler.
 - [x] Replay synthetic snapshots and depth updates with deterministic book state.
 - [x] Extend replay to captured sessions with depth and lifecycle events.
-- [ ] Introduce a simulation clock.
+- [x] Advance execution time using recorded monotonic offsets.
 - [x] Verify reproducible event ordering and book results on synthetic sessions.
 
 ### 3. First complete paper trading experiment
 
 - [x] Build and validate a local order book using synthetic snapshots and depth updates.
+- [x] Add an execution interface and a scripted virtual-order scenario.
 - [ ] Add a strategy interface and a simple example strategy.
-- [ ] Simulate market orders with spread, available depth, and fees.
-- [ ] Track cash, positions, and PnL.
-- [ ] Add position and order-size limits.
-- [ ] Export a trade journal and session summary.
+- [x] Simulate market orders with spread, available depth, and fees.
+- [x] Track total, reserved, and available USDT/BTC in a separate account ledger.
+- [ ] Add cost basis and realized/unrealized PnL.
+- [x] Add position and order-size limits.
+- [x] Print an operation journal and final account summary.
+- [ ] Export a machine-readable trade journal and session summary.
 
 **First milestone of a complete system:** record a market session, replay it, and execute virtual market orders with explicit liquidity and fee assumptions.
 
@@ -129,7 +136,8 @@ Checked items below are implemented; unchecked items remain planned.
 - [ ] Model order submission and cancellation delays.
 - [ ] Add limit orders, partial fills, and queue assumptions.
 - [ ] Compare results under different execution assumptions.
-- [ ] Add stale-data handling and an emergency trading stop.
+- [x] Block decisions on stale or invalid depth.
+- [ ] Add an emergency trading stop.
 
 ### 5. Linux performance research
 
@@ -184,11 +192,12 @@ tickforge | Market research engine
 Mode      | SIMULATION ONLY
 ```
 
-The seven default CTest checks cover startup, input validation, deterministic console output,
+The ten default CTest checks cover startup, input validation, deterministic console output,
 snapshots, absolute updates, deletions, stale ranges, gaps, crossed books, recovery,
 decimal display, recording, and live/replay synchronization state equality. Enabling
-live capture adds an eighth offline test for Binance JSON/metadata normalization.
-Execution/accounting are not implemented or tested yet.
+live capture adds an eleventh offline test for Binance JSON/metadata normalization.
+Paper checks cover fees, reserves, partial fills, duplicate receipts, uncertain
+results, order/position limits, stale data, and checked monetary arithmetic.
 No network connection or credentials are needed.
 
 Replay the synthetic example:
@@ -206,6 +215,24 @@ recorded levels, not guaranteed complete market depth.
 In Visual Studio's `launch.vs.json`, set `"currentDir": "${projectDir}"` and
 `"args": ["replay", "examples/synthetic-book.csv"]` to resolve the fixture from
 the repository root.
+
+Run the complete virtual-account example (works in native Windows and Linux builds):
+
+```sh
+./build/tickforge paper examples/synthetic-book.csv examples/paper-orders.csv
+```
+
+It starts with 1000 virtual USDT and finishes with **609.20148650 USDT and 0.006 BTC**,
+eight fills, one rejected request, and zero outstanding reserves. These are balances,
+not a PnL calculation. In Visual Studio, use:
+
+```json
+"args": ["paper", "examples/synthetic-book.csv", "examples/paper-orders.csv"]
+```
+
+See [paper trading](docs/paper-trading.md) for scenario units, fee rounding,
+liquidity assumptions, and the separate accounting/execution components.
+
 For a release build, use a separate directory:
 
 ```sh

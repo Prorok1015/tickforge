@@ -4,4 +4,5 @@
 namespace tickforge::app {
 void replay_session(std::string_view path);
 void capture_session(std::string_view path, unsigned seconds);
+void paper_session(std::string_view session_path, std::string_view scenario_path);
 }

@@ -1,0 +1,4 @@
+add_executable(execution_tests execution_tests.cpp)
+target_link_libraries(execution_tests PRIVATE tickforge_execution)
+tickforge_enable_warnings(execution_tests)
+add_test(NAME execution_contract COMMAND execution_tests)

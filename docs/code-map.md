@@ -16,6 +16,14 @@ tickforge/
       CMakeLists.txt
       include/tickforge/core/       public domain/session headers
       src/                         implementations
+    accounting/                    library: tickforge_accounting (balances/reserves)
+      CMakeLists.txt
+      include/tickforge/accounting/
+      src/
+    execution/                     library: tickforge_execution (simulation/orders)
+      CMakeLists.txt
+      include/tickforge/execution/
+      src/
     console/                       library: tickforge_console
       CMakeLists.txt
       include/tickforge/console/    public presentation headers
@@ -33,9 +41,14 @@ tickforge/
       commands.hpp                 command declarations
       replay_command.cpp           replay command
       capture_command.cpp          capture command / disabled-feature error
+      paper_command.cpp            offline paper trading command
+      paper_scenario.*             scheduled requests/configuration parser
+      paper_reporter.*             virtual-order/account journal
   tests/
     CMakeLists.txt
     core/                          session, synchronization, and book contracts
+    accounting/                    ledger and checked money arithmetic
+    execution/                     fills, virtual liquidity, and risk
     console/                       exact decimal display
     adapters/binance/              Binance-shaped JSON (no network)
     app/                           CLI integration checks
@@ -54,6 +67,11 @@ An arrow means **uses / links to**, not event flow:
 flowchart TD
     App["app: tickforge"] --> Core["core: tickforge_core"]
     App --> Console["console: tickforge_console"]
+    App --> Execution["execution: tickforge_execution"]
+    App --> Accounting["accounting: tickforge_accounting"]
+    Execution --> Accounting
+    Execution --> Core
+    Accounting --> Core
     App -. "capture enabled" .-> Live["adapters/binance: tickforge_binance"]
     Console --> Core
     Live --> Core
@@ -64,6 +82,9 @@ flowchart TD
 - `core` uses the C++ standard library only. It has no terminal or network dependency.
 - `console` publicly depends on `core` because its public functions/classes use core
   types such as `OrderBook` and `BookTracker`.
+- `accounting` publicly depends on core order/fill types. It does not depend on an
+  execution implementation or a venue. `execution` depends on accounting and core;
+  only the app assembles it with presentation and a replay/scenario.
 - `adapters/binance` publicly depends on `core` because its normalization API returns core
   events. It privately depends on `console` for capture diagnostics and on external
   libraries for its implementation. It does not expose JSON/Boost/OpenSSL types.
@@ -80,6 +101,7 @@ CMake carries that link requirement automatically.
 | Header / implementation | Responsibility |
 | --- | --- |
 | `events.hpp` | Shared vocabulary: times, trades, levels, snapshots, depth ranges, and local resets. `MarketEvent` holds one of these payloads. |
+| `orders.hpp` / `amounts.hpp` / `amounts.cpp` | Shared order/fill/result types and checked nonnegative integer monetary arithmetic. |
 | `order_book.hpp` / `.cpp` | Known price levels in ordered maps, absolute-size updates, best bid/ask, spread, and range validation. |
 | `book_tracker.hpp` / `.cpp` | Decides when the book may be exposed. Buffers depth around REST snapshots, establishes a stream bridge, and hides quotes after resets/gaps. |
 | `recorder.hpp` / `.cpp` | Creates a new recording exclusively, writes normalized events in order, flushes them, and marks successful completion with a footer. |
@@ -162,11 +184,27 @@ A market-data adapter receives prices, trades, and book changes. The current
 Binance adapter only reads public depth and metadata. It has no account access.
 
 An order-execution adapter would send orders/cancellations and consume order-status
-and fill reports. It is a separate responsibility, not implemented here. A strategy
-should eventually depend on an execution interface; the first implementation will
-be a local simulator. A real venue execution adapter would require an explicit
+and fill reports. It is a separate responsibility, not implemented here. The paper
+command uses a synchronous execution interface in the current stage. The
+first implementation is a local simulator, driven by scripted requests rather
+than a strategy. A real venue execution adapter would require an explicit
 later stage, authentication, reconciliation, and handling uncertain request results.
 Do not add real execution to the public market-data adapter implicitly.
+
+## Paper trading components
+
+`accounting/account.hpp/.cpp` owns total/reserved/available USDT and BTC, order
+reservations, and receipt deduplication. `execution/execution.hpp` defines the
+synchronous interface and explicit paper settings. `simulator.hpp/.cpp` consumes
+replay events, guards book freshness, and simulates fills using separate virtual
+liquidity counters. `order_manager.hpp/.cpp` performs risk checks, reserves funds,
+calls the executor, validates confirmed results, and commits them to the account.
+
+The app's `paper_command.cpp` connects these pieces; `paper_scenario.*` reads
+experimental inputs, and `paper_reporter.*` prints the operation journal. No new
+network or console dependency is introduced into the ledger/execution libraries.
+See [paper trading](paper-trading.md) for units, scenario syntax, assumptions,
+example balances, and failure behavior. PnL and an automatic strategy remain planned.
 
 ## Working in stages
 

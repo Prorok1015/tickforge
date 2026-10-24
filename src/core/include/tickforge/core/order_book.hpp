@@ -19,6 +19,8 @@ public:
     std::optional<std::int64_t> spread_atoms() const;
     std::size_t bid_levels() const { return bids_.size(); }
     std::size_t ask_levels() const { return asks_.size(); }
+    std::vector<Level> bid_depth() const; // best price first; known levels only
+    std::vector<Level> ask_depth() const;
 
 private:
     void invalidate();

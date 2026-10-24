@@ -1,10 +1,13 @@
 add_library(tickforge_core
     include/tickforge/core/events.hpp
+    include/tickforge/core/orders.hpp
+    include/tickforge/core/amounts.hpp
     include/tickforge/core/order_book.hpp
     include/tickforge/core/book_tracker.hpp
     include/tickforge/core/replay.hpp
     include/tickforge/core/recorder.hpp
     src/order_book.cpp
+    src/amounts.cpp
     src/book_tracker.cpp
     src/replay.cpp
     src/recorder.cpp
