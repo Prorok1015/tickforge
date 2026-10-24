@@ -4,7 +4,9 @@
 - Keep Linux as the target platform and state separately what was checked in WSL and native Windows.
 - Organize each production CMake target in its own directory with its own `CMakeLists.txt`.
   Put reusable headers under that target's `include/tickforge/<component>/` and implementations
-  under `src/`. Declare dependencies on the owning target, with appropriate PUBLIC/PRIVATE scope.
+  under `src/`. Venue adapters live in `src/adapters/<venue>/` with matching header paths and
+  namespaces `tickforge::adapters::<venue>`. Declare dependencies on the owning target,
+  with appropriate PUBLIC/PRIVATE scope.
 - Keep `main.cpp` as a small entry point. Argument handling, commands, presentation, domain
   logic, and network adapters belong to their respective components.
 - Finish work in small stages. After each completed stage, run the relevant checks and create

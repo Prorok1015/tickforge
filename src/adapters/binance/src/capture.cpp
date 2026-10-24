@@ -1,5 +1,5 @@
-#include <tickforge/live/capture.hpp>
-#include <tickforge/live/binance_protocol.hpp>
+#include <tickforge/adapters/binance/capture.hpp>
+#include <tickforge/adapters/binance/binance_protocol.hpp>
 #include <tickforge/core/book_tracker.hpp>
 #include <tickforge/console/console.hpp>
 #include <tickforge/core/recorder.hpp>
@@ -21,7 +21,7 @@
 #include <stdexcept>
 #include <type_traits>
 
-namespace tickforge {
+namespace tickforge::adapters::binance {
 namespace {
 namespace net = boost::asio;
 namespace ssl = net::ssl;
@@ -361,7 +361,7 @@ private:
 };
 } // namespace
 
-void capture_binance(const std::string& path, unsigned seconds)
+void capture(const std::string& path, unsigned seconds)
 {
     if (seconds == 0 || seconds > 3600) throw std::runtime_error("capture duration must be 1..3600 seconds");
     net::io_context io;
@@ -371,4 +371,4 @@ void capture_binance(const std::string& path, unsigned seconds)
     if (!capture->failure().empty()) throw std::runtime_error(capture->failure());
     if (std::fflush(stdout) != 0) throw std::runtime_error("console flush failed");
 }
-} // namespace tickforge
+} // namespace tickforge::adapters::binance

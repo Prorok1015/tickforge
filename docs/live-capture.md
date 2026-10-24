@@ -5,6 +5,11 @@ hosts. It does not subscribe to trades yet, authenticate, accept keys, or submit
 orders. The resulting normalized session is readable by the same offline replay
 command. Market records are not included in the repository.
 
+The adapter lives in `src/adapters/binance/`, builds as `tickforge_binance`, and
+uses the namespace `tickforge::adapters::binance`. `TICKFORGE_ENABLE_LIVE` is kept
+as the existing opt-in switch; capture/replay commands are unchanged. This is a
+market-data adapter only, not an order-execution API.
+
 ## Linux / WSL build
 
 Keep the default dependency-free build for replay, or enable the network component:

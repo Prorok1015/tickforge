@@ -2,7 +2,7 @@ add_executable(tickforge main.cpp cli.hpp cli.cpp commands.hpp replay_command.cp
 target_link_libraries(tickforge PRIVATE tickforge_core tickforge_console)
 if(TICKFORGE_ENABLE_LIVE)
     target_compile_definitions(tickforge PRIVATE TICKFORGE_ENABLE_LIVE=1)
-    target_link_libraries(tickforge PRIVATE tickforge_live)
+    target_link_libraries(tickforge PRIVATE tickforge_binance)
 endif()
 # Keep existing ./build/tickforge commands and VS launch targets working.
 set_target_properties(tickforge PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")

@@ -33,6 +33,9 @@ The default replay build uses C++20, CMake, and CTest without external libraries
 See the [code map](docs/code-map.md) for target directories, file responsibilities,
 and dependency/data-flow diagrams. Each production target owns a directory and a
 local `CMakeLists.txt`; `main.cpp` delegates to the application command dispatcher.
+Venue-specific market data code lives under `src/adapters/<venue>/`; the first
+adapter is `adapters/binance` (`tickforge_binance`). Replay uses the same event
+model and remains in `core`. Order execution is a separate, future responsibility.
 
 ## Intended architecture
 

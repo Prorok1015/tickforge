@@ -1,4 +1,4 @@
-#include <tickforge/live/binance_protocol.hpp>
+#include <tickforge/adapters/binance/binance_protocol.hpp>
 #include <cstdio>
 #include <format>
 #include <stdexcept>
@@ -15,7 +15,7 @@ template<class Function> void rejects(Function function)
 
 int main()
 {
-    using namespace tickforge;
+    using namespace tickforge::adapters::binance;
     try {
         check(decimal_atoms("65000.01000000", 2) == 6500001, "decimal conversion must be exact");
         check(decimal_atoms("0.00000001", 8) == 1, "smallest quantity must be retained");

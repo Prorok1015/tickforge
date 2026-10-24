@@ -1,6 +1,6 @@
 #include "commands.hpp"
 #ifdef TICKFORGE_ENABLE_LIVE
-#include <tickforge/live/capture.hpp>
+#include <tickforge/adapters/binance/capture.hpp>
 #endif
 #include <stdexcept>
 #include <string>
@@ -9,7 +9,7 @@ namespace tickforge::app {
 void capture_session(std::string_view path, unsigned seconds)
 {
 #ifdef TICKFORGE_ENABLE_LIVE
-    capture_binance(std::string(path), seconds);
+    adapters::binance::capture(std::string(path), seconds);
 #else
     static_cast<void>(path);
     static_cast<void>(seconds);

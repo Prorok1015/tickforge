@@ -1,9 +1,9 @@
-#include <tickforge/live/binance_protocol.hpp>
+#include <tickforge/adapters/binance/binance_protocol.hpp>
 #include <nlohmann/json.hpp>
 #include <limits>
 #include <stdexcept>
 
-namespace tickforge {
+namespace tickforge::adapters::binance {
 namespace {
 using Json = nlohmann::json;
 constexpr auto maximum = std::numeric_limits<std::int64_t>::max();
@@ -112,4 +112,4 @@ bool is_server_shutdown(std::string_view json)
     const auto root = Json::parse(json);
     return root.value("e", std::string{}) == "serverShutdown";
 }
-} // namespace tickforge
+} // namespace tickforge::adapters::binance

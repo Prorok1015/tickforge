@@ -3,7 +3,7 @@
 #include <tickforge/core/events.hpp>
 #include <string_view>
 
-namespace tickforge {
+namespace tickforge::adapters::binance {
 
 struct InstrumentRules {
     std::int64_t price_tick_atoms;
@@ -16,4 +16,4 @@ BookSnapshot parse_snapshot(std::string_view json, const InstrumentRules& rules)
 BookUpdate parse_depth(std::string_view json, const InstrumentRules& rules, std::int64_t& exchange_ns);
 bool is_server_shutdown(std::string_view json);
 
-} // namespace tickforge
+} // namespace tickforge::adapters::binance

@@ -1,6 +1,4 @@
 add_subdirectory(core)
 add_subdirectory(console)
-if(TICKFORGE_ENABLE_LIVE)
-    add_subdirectory(live)
-endif()
+add_subdirectory(adapters)
 add_subdirectory(app)
