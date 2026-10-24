@@ -36,6 +36,7 @@ local `CMakeLists.txt`; `main.cpp` delegates to the application command dispatch
 Venue-specific market data code lives under `src/adapters/<venue>/`; the first
 adapter is `adapters/binance` (`tickforge_binance`). Replay uses the same event
 model and remains in `core`. Order execution is a separate, future responsibility.
+For Visual Studio builds and launches targeting Linux, see [Visual Studio + WSL](docs/visual-studio-wsl.md).
 
 ## Intended architecture
 

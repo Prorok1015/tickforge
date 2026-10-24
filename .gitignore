@@ -72,3 +72,7 @@ Testing/
 
 # Private local market recordings (provider redistribution rights are separate)
 /recordings/
+
+# Preset build output and machine-specific CMake overrides
+/out/
+/CMakeUserPresets.json

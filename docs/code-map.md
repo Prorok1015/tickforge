@@ -8,6 +8,7 @@ example `<tickforge/core/events.hpp>`.
 ```text
 tickforge/
   CMakeLists.txt                    project options and subdirectories
+  CMakePresets.json                 shared Windows / Linux / WSL build profiles
   cmake/ProjectOptions.cmake        compiler capability check and warnings helper
   src/
     CMakeLists.txt                  component build order
@@ -177,3 +178,5 @@ separate user request.
 The executable remains at `build/tickforge` (or the existing configuration-specific
 Windows output location), so the documented run commands do not change. After a
 layout change, reconfigure CMake; it will discover the new target locations.
+For IDE setup, preset selection, and GDB startup items, see
+[Visual Studio + WSL](visual-studio-wsl.md).
