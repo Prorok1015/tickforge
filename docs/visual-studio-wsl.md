@@ -55,7 +55,7 @@ generated value if VS adds a path suffix.
   "project": "src/app/CMakeLists.txt",
   "projectTarget": "tickforge",
   "debuggerConfiguration": "gdb",
-  "program": "${debugInfo.fullTargetPath}",
+  "program": "${cmake.binaryDir}/tickforge",
   "cwd": "/absolute/Linux/path/to/project",
   "args": ["capture", "recordings/vs-wsl-live.csv", "60"]
 }
@@ -71,19 +71,19 @@ If VS generates a generic configuration named `CMakeLists.txt` with an empty
 `projectTarget`, it has created a template rather than selected the executable.
 The target here is `tickforge`, declared in `src/app/CMakeLists.txt`.
 
-If `${debugInfo.fullTargetPath}` still cannot be evaluated, a machine-local startup
-item can explicitly set `program` to the verified Linux binary and
-`remoteMachineName` to the existing WSL connection name (for example `WSL: Ubuntu`).
-For the default VS source-copy location, a personal preset may produce a path such
-as `/home/<user>/.vs/tickforge/out/build/wsl-live-local/tickforge`. Check that this
-file exists in WSL first; do not copy a Windows `.exe` path or assume this location
-matches another preset. This explicit path is tied to that local build and must be
-updated if its preset/source-copy directory changes.
+`${debugInfo.fullTargetPath}` is the standard full executable path when VS resolves
+the startup item's target binding. If it cannot be evaluated, use
+`${cmake.binaryDir}/tickforge` as shown above: `cmake.binaryDir` comes from the active
+Configure Preset and follows its Linux build directory automatically. This project
+explicitly places `tickforge` at the root of that directory. The filename remains
+explicit, but the user name, source-copy directory, and preset name are not hardcoded.
+Keep the WSL target system and a Linux preset selected. A local startup item can
+also specify `remoteMachineName` as the existing WSL connection (e.g. `WSL: Ubuntu`).
 
 With the native WSL2 toolset, Visual Studio normally copies source into the Linux
 filesystem. Do not assume the Linux build and the Windows checkout share the same
-working directory. `program` should follow `debugInfo.fullTargetPath`, not an old
-Windows `out/build/x64-Debug/tickforge.exe`.
+working directory. `program` should follow the active Linux target or preset,
+not an old Windows `out/build/x64-Debug/tickforge.exe`.
 
 ## Verify outside the IDE
 
