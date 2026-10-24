@@ -1,0 +1,118 @@
+# Public Binance depth capture
+
+This milestone captures **BTCUSDT spot depth only** through public market-data-only
+hosts. It does not subscribe to trades yet, authenticate, accept keys, or submit
+orders. The resulting normalized session is readable by the same offline replay
+command. Market records are not included in the repository.
+
+## Linux / WSL build
+
+Keep the default dependency-free build for replay, or enable the network component:
+
+```sh
+sudo apt-get update
+sudo apt-get install build-essential cmake ninja-build ca-certificates libboost-dev libssl-dev nlohmann-json3-dev
+cmake -S . -B build-live -G Ninja -DCMAKE_BUILD_TYPE=Release -DTICKFORGE_ENABLE_LIVE=ON
+cmake --build build-live -j 2
+ctest --test-dir build-live --output-on-failure
+mkdir -p recordings
+./build-live/tickforge capture recordings/btcusdt-session.csv 30
+./build-live/tickforge replay recordings/btcusdt-session.csv
+```
+
+Use a C++20 compiler and standard library supporting `std::format` (the verified
+compiler is GCC 15.2). The network component needs Boost 1.74+, OpenSSL, and
+nlohmann/json 3.10+. Package names above are for Ubuntu. Boost.Beast handles HTTPS
+and WebSocket framing/control messages; OpenSSL verifies certificates and hostnames;
+nlohmann/json parses payloads. Decimal strings are converted to checked integers,
+without binary floating point. There is one application event loop; asynchronous
+DNS resolution may use a library-managed worker.
+
+The output file must not already exist. Recording opens it exclusively and flushes
+each event; this favors debuggability and explicit failure over capture throughput.
+Create the parent directory beforehand. `recordings/` is ignored by Git. Local
+recording does not establish redistribution rights: check applicable provider terms
+before publishing any actual market data.
+
+The optional duration defaults to 30 seconds, including setup, and accepts 1..3600.
+Ctrl+C/SIGTERM requests an orderly end. A successful recording requires that a
+synchronized book was established at least once. A fatal error leaves an incomplete
+file without a footer; replay returns failure even if some rows could be processed.
+Existing recordings are never overwritten.
+
+For Visual Studio on Windows, use the WSL Linux target with these dependencies and
+`TICKFORGE_ENABLE_LIVE=ON`. Arguments are `capture`, `recordings/btcusdt-session.csv`,
+`30`; set the working directory to the repository root and create `recordings` there.
+Native Windows replay remains supported. Native Windows networking has not been
+verified; it also needs the optional dependencies and a usable TLS certificate store.
+
+## Synchronization and recording order
+
+1. Fetch current BTCUSDT `exchangeInfo` and check the tick/quantity step against the
+   fixed integer representation. Values or metadata that cannot be represented
+   exactly are rejected. This is validation of units/lattice, not order eligibility:
+   order-size limits, minimum notional, and execution fees are not modeled yet.
+2. Open `wss://data-stream.binance.vision/ws/btcusdt@depth@100ms`.
+3. On the first depth event, request a REST snapshot with up to 5000 levels per side.
+   Continue reading, recording, and buffering WebSocket events while REST is pending.
+4. Record the snapshot when received. The shared `BookTracker` combines it with
+   buffered events and waits for a depth range covering the next required ID.
+   Quotes remain hidden until this bridge is established. If the snapshot is too
+   old, request a new one on a subsequent depth event.
+5. Apply later ranges, ignore covered IDs, and invalidate on a sequence gap. Fetch
+   a fresh snapshot while continuing to receive events.
+
+The recording preserves application receipt order across both sources. Its ordinal
+is not a Binance ID. Receive timestamps are sampled at the callback for a complete
+WebSocket message / HTTP response, before JSON parsing; they are not kernel/NIC
+timestamps. Exchange timestamps are converted from the stream's default milliseconds
+to nanoseconds without claiming increased precision. REST snapshots and local reset
+events have no exchange timestamp and use zero. The monotonic session origin stays
+the same across reconnects.
+
+Only known price levels are maintained. A bounded REST snapshot does not reveal all
+market depth, and newly changed levels can make the local level count exceed 5000.
+Neither a fresh message nor synchronization proves that public data has no latency.
+
+## Failure behavior
+
+- A connection error, server shutdown notification, or more than five seconds without
+  a depth message clears quotes immediately when detected and records a local reset.
+  The watchdog checks once a second. Reconnection always starts with a fresh snapshot.
+- Reconnection delays are 1, 2, 4, 8, and 8 seconds, with at most five reconnects per
+  capture. Snapshot requests are limited to twelve per capture. Bootstrap buffering
+  is bounded to 4096 events and 200000 price-level changes.
+- HTTP errors stop capture and report status / `Retry-After`. In particular, rate
+  limits and regional/access denials do not trigger an automatic request loop.
+- TLS verification is always enabled. Malformed JSON, invalid instrument values,
+  buffer overflow, and storage errors stop capture. Ping/pong frames are handled by
+  Beast while reads are active. REST bodies and WebSocket messages have size limits.
+- Successful shutdown records `reset,...,shutdown`, then an `end` footer. The final
+  replay book is deliberately unavailable after shutdown. A completed file may
+  contain intervals of unavailable data; it is not a claim of uninterrupted capture.
+
+The console prints book state about once a second, plus lifecycle/synchronization
+changes. Every accepted depth message is still recorded. Replay prints every event.
+Slow storage/console output can stall this simple event loop; performance profiling
+and an independent receive queue are future work if measurements require them.
+
+## Validation and limits
+
+Automated offline tests cover Binance-shaped JSON, exact decimal normalization,
+metadata filters, timestamp/ID overflow, snapshot bridging, gaps, local resets,
+recording/replay state equality, exclusive file creation, and incomplete sessions.
+No CTest test requires the network. The original synthetic v1/v2 fixtures remain
+supported. A short real WSL capture and its offline replay were checked on 2026-10-24;
+24-hour rotation and injected network/TLS/rate-limit failures have not been exercised
+against the real service. Native Windows networking remains unverified.
+
+The verified Release build with GCC 15.2 and Ubuntu Boost 1.83 emitted an
+`-Warray-bounds` diagnostic inside Boost.Asio's resolver implementation. No warnings
+were suppressed; the offline and real-network checks completed successfully. This
+dependency/compiler diagnostic has not been resolved across other Boost versions.
+
+Official references checked on 2026-10-24:
+
+- [Public market-data-only endpoints](https://github.com/binance/binance-spot-api-docs/blob/master/faqs/market_data_only.md)
+- [Depth stream, ping/pong, and local book synchronization](https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md)
+- [REST exchange metadata and depth snapshot](https://github.com/binance/binance-spot-api-docs/blob/master/rest-api.md)

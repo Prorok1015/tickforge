@@ -4,7 +4,7 @@ A C++ trading research engine for Linux with live market data, paper trading, an
 
 ## Status
 
-**Planning stage.** This repository currently contains project documentation and an Apache 2.0 license. The capabilities below describe the intended design and roadmap; no runnable trading engine is available yet.
+**Public depth capture and deterministic replay.** The C++20 CLI optionally connects to Binance Spot BTCUSDT public depth, synchronizes a local book, and records normalized sessions for offline replay. Gaps, reconnects, stale depth, and snapshot bridging invalidate/hide quotes when needed. Strategy, execution, accounting, and live trade capture remain planned.
 
 ## Why tickforge?
 
@@ -28,7 +28,7 @@ Planned capabilities:
 - Produce an execution journal and a session summary.
 - Measure processing latency and investigate bottlenecks on Linux.
 
-The first venue, instrument, C++ standard, dependencies, and build tooling are still to be selected.
+The default replay build uses C++20, CMake, and CTest without external libraries. Optional public capture uses Boost.Beast, OpenSSL, and nlohmann/json. Binance Spot BTCUSDT is selected for the first adapter. See [first implementation steps](docs/first-steps.md) for rationale, alternatives, and data-access limitations.
 
 ## Intended architecture
 
@@ -87,25 +87,27 @@ Exchange timestamps and local receive timestamps will be recorded separately. In
 
 ## Roadmap
 
-All milestones below are planned.
+Checked items below are implemented; unchecked items remain planned.
 
 ### 1. Market data capture
 
-- [ ] Select one venue and instrument.
-- [ ] Establish a Linux C++ build and basic checks.
-- [ ] Connect to the public market data feed.
-- [ ] Record events with timestamps and ordering metadata.
-- [ ] Detect disconnects and sequence gaps; implement recovery.
+- [x] Select one venue and instrument.
+- [x] Establish a Linux C++ build and basic checks.
+- [x] Connect to the public depth feed (trade stream still planned).
+- [x] Record depth and lifecycle events with timestamps and ordering metadata.
+- [x] Detect disconnects and sequence gaps; implement bounded recovery.
 
 ### 2. Deterministic replay
 
-- [ ] Replay a recorded session through the event pipeline.
+- [x] Replay a versioned synthetic trade session through a synchronous event handler.
+- [x] Replay synthetic snapshots and depth updates with deterministic book state.
+- [x] Extend replay to captured sessions with depth and lifecycle events.
 - [ ] Introduce a simulation clock.
-- [ ] Verify reproducible event ordering and results.
+- [x] Verify reproducible event ordering and book results on synthetic sessions.
 
 ### 3. First complete paper trading experiment
 
-- [ ] Build and validate a local order book.
+- [x] Build and validate a local order book using synthetic snapshots and depth updates.
 - [ ] Add a strategy interface and a simple example strategy.
 - [ ] Simulate market orders with spread, available depth, and fees.
 - [ ] Track cash, positions, and PnL.
@@ -147,7 +149,83 @@ Performance results will include the workload, hardware, build configuration, an
 
 ## Getting started
 
-There is no executable or build procedure yet. Build instructions, dependencies, example configurations, and a reproducible sample session will be added with the first implementation.
+Requirements: a Linux C++20 compiler and standard library with `std::format` support
+(for example GCC 13+ with matching libstdc++), CMake 3.20+, and a build tool.
+CMake checks `<format>` support explicitly; a compiler accepting C++20 alone is
+not sufficient. GCC 15.2 is the currently verified Linux compiler.
+For Ubuntu, install the packages if needed:
+
+```sh
+sudo apt-get update
+sudo apt-get install build-essential cmake ninja-build
+```
+
+From the repository root in a Linux or WSL Ubuntu shell:
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+ctest --test-dir build --output-on-failure
+./build/tickforge
+```
+
+The startup screen includes:
+
+```text
+tickforge | Market research engine
+Mode      | SIMULATION ONLY
+```
+
+The six default CTest checks cover startup, input validation, deterministic console output,
+snapshots, absolute updates, deletions, stale ranges, gaps, crossed books, recovery,
+decimal display, recording, and live/replay synchronization state equality. Enabling
+live capture adds a seventh offline test for Binance JSON/metadata normalization.
+Execution/accounting are not implemented or tested yet.
+No network connection or credentials are needed.
+
+Replay the synthetic example:
+
+```sh
+./build/tickforge replay examples/synthetic-book.csv
+```
+
+The example deliberately includes a gap and recovery: the final summary reports
+eight events, two integrity warnings, and a book synchronized at ID 112. The older
+trade-only `examples/synthetic.csv` still works. See [session formats](docs/session-format.md)
+for units, timestamp semantics, output, and failure behavior. Quotes show only known
+recorded levels, not guaranteed complete market depth.
+
+In Visual Studio's `launch.vs.json`, set `"currentDir": "${projectDir}"` and
+`"args": ["replay", "examples/synthetic-book.csv"]` to resolve the fixture from
+the repository root.
+For a release build, use a separate directory:
+
+```sh
+cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release
+ctest --test-dir build-release --output-on-failure
+```
+
+To build and run **public Binance depth capture** under Linux/WSL, follow
+[live capture](docs/live-capture.md). It requires `-DTICKFORGE_ENABLE_LIVE=ON` and
+the optional dependencies. Example after that build:
+
+```sh
+mkdir -p recordings
+./build-live/tickforge capture recordings/btcusdt-session.csv 30
+./build-live/tickforge replay recordings/btcusdt-session.csv
+```
+
+The file must be new. Capture uses no keys and cannot place orders. Successful
+shutdown invalidates the book and saves a completion footer; incomplete files are
+rejected by replay. Actual market recordings should remain private unless provider
+redistribution rights have been established.
+
+Verified on 2026-10-24 in Ubuntu under WSL2 (Linux 6.6.87.2, GCC 15.2.0,
+CMake 3.28.3, Ninja). A short real depth capture and offline replay were also verified
+in WSL. Native Windows x64 Debug replay is checked using Visual Studio 2026 / MSVC
+19.51. Native Windows networking, standalone Linux hosts, other compilers, and
+long-running/24-hour network recovery remain unverified. Linux is the target platform.
 
 ## License
 

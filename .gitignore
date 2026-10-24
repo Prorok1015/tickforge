@@ -60,9 +60,15 @@ compile_commands.json
 # vcpkg
 vcpkg_installed/
 
+# VisualStudio
+.vs/
+
 # debug information files
 *.dwo
 
 # test output & cache
 Testing/
 .cache/
+
+# Private local market recordings (provider redistribution rights are separate)
+/recordings/
