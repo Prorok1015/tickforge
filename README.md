@@ -30,6 +30,10 @@ Planned capabilities:
 
 The default replay build uses C++20, CMake, and CTest without external libraries. Optional public capture uses Boost.Beast, OpenSSL, and nlohmann/json. Binance Spot BTCUSDT is selected for the first adapter. See [first implementation steps](docs/first-steps.md) for rationale, alternatives, and data-access limitations.
 
+See the [code map](docs/code-map.md) for target directories, file responsibilities,
+and dependency/data-flow diagrams. Each production target owns a directory and a
+local `CMakeLists.txt`; `main.cpp` delegates to the application command dispatcher.
+
 ## Intended architecture
 
 ```text
@@ -176,10 +180,10 @@ tickforge | Market research engine
 Mode      | SIMULATION ONLY
 ```
 
-The six default CTest checks cover startup, input validation, deterministic console output,
+The seven default CTest checks cover startup, input validation, deterministic console output,
 snapshots, absolute updates, deletions, stale ranges, gaps, crossed books, recovery,
 decimal display, recording, and live/replay synchronization state equality. Enabling
-live capture adds a seventh offline test for Binance JSON/metadata normalization.
+live capture adds an eighth offline test for Binance JSON/metadata normalization.
 Execution/accounting are not implemented or tested yet.
 No network connection or credentials are needed.
 

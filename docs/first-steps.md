@@ -4,8 +4,11 @@
 
 Use C++20 without compiler extensions, CMake 3.20 or newer, and CTest.
 C++20 provides useful standard facilities while remaining available on established
-Linux toolchains; this project does not need C++23 features yet. The replay component
-and order book components form a small library shared by the CLI and contract tests.
+Linux toolchains; this project does not need C++23 features yet. Core events, replay,
+recording, and order book code form `tickforge_core`. Console presentation has its
+own library, and the optional live adapter owns its network dependencies. Each
+production target has a matching directory and local `CMakeLists.txt`; see the
+[code map](code-map.md).
 Ninja is a convenient optional build backend. Start without downloaded dependencies.
 
 Console text is assembled with `std::format` and written with checked stdio calls;

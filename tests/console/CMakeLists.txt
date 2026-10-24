@@ -1,0 +1,4 @@
+add_executable(console_tests console_tests.cpp)
+target_link_libraries(console_tests PRIVATE tickforge_console)
+tickforge_enable_warnings(console_tests)
+add_test(NAME console_contract COMMAND console_tests)

@@ -1,0 +1,4 @@
+add_executable(binance_protocol_tests binance_protocol_tests.cpp)
+target_link_libraries(binance_protocol_tests PRIVATE tickforge_live)
+tickforge_enable_warnings(binance_protocol_tests)
+add_test(NAME binance_protocol COMMAND binance_protocol_tests)
