@@ -56,16 +56,27 @@ generated value if VS adds a path suffix.
   "projectTarget": "tickforge",
   "debuggerConfiguration": "gdb",
   "program": "${cmake.binaryDir}/tickforge",
-  "cwd": "/absolute/Linux/path/to/project",
+  "cwd": "${env.TICKFORGE_SOURCE_DIR}",
   "args": ["capture", "recordings/vs-wsl-live.csv", "60"]
 }
 ```
 
-`cwd` is a Linux path. It may point at the mounted Windows checkout under `/mnt/c/`
-to keep recordings visible from both Windows and WSL, even when VS builds a copy
-of the source inside the Linux filesystem. Create `recordings/` under that working
-directory. Choose a new output filename for each run: existing recordings are not
-overwritten. Use F5 to debug, or Ctrl+F5 to run without debugging.
+The base Configure Preset exports `TICKFORGE_SOURCE_DIR=${sourceDir}`. Visual Studio
+passes preset environment variables to startup items, so this `cwd` follows the
+active target's source directory without embedding a user name or mounted-drive
+path in `launch.vs.json`. Windows startup items can use the same variable in
+`currentDir`. Reconfigure CMake after introducing this environment setting.
+
+For native WSL2 source-copy builds, recordings are now under the **Linux copy** of
+the project, not necessarily the Windows checkout. Create `recordings/` there, or
+use `preDebugCommand: mkdir -p "${env.TICKFORGE_SOURCE_DIR}/recordings"` in the Linux
+startup item. Choose a new output filename for each run: existing recordings are
+not overwritten. Use F5 to debug, or Ctrl+F5 to run without debugging.
+
+A useful local launch list contains Windows replay/paper and WSL replay/paper/live.
+Use committed synthetic fixtures for replay/paper so those configurations do not
+depend on a private recording. Capture requires a live-enabled Linux preset such
+as `wsl-live-local`; do not retain an empty `CMakeLists.txt` template as a startup item.
 
 If VS generates a generic configuration named `CMakeLists.txt` with an empty
 `projectTarget`, it has created a template rather than selected the executable.

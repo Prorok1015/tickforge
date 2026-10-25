@@ -7,6 +7,9 @@
       "hidden": true,
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "environment": {
+        "TICKFORGE_SOURCE_DIR": "${sourceDir}"
+      },
       "cacheVariables": {
         "BUILD_TESTING": true,
         "CMAKE_EXPORT_COMPILE_COMMANDS": true
