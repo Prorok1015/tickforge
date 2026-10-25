@@ -52,10 +52,9 @@ generated value if VS adds a path suffix.
 {
   "type": "cppgdb",
   "name": "tickforge WSL live",
-  "project": "src/app/CMakeLists.txt",
+  "project": "CMakeLists.txt",
   "projectTarget": "tickforge",
   "debuggerConfiguration": "gdb",
-  "program": "${cmake.binaryDir}/tickforge",
   "cwd": "${env.TICKFORGE_SOURCE_DIR}",
   "args": ["capture", "recordings/vs-wsl-live.csv", "60"]
 }
@@ -82,14 +81,17 @@ If VS generates a generic configuration named `CMakeLists.txt` with an empty
 `projectTarget`, it has created a template rather than selected the executable.
 The target here is `tickforge`, declared in `src/app/CMakeLists.txt`.
 
-`${debugInfo.fullTargetPath}` is the standard full executable path when VS resolves
-the startup item's target binding. If it cannot be evaluated, use
-`${cmake.binaryDir}/tickforge` as shown above: `cmake.binaryDir` comes from the active
-Configure Preset and follows its Linux build directory automatically. This project
-explicitly places `tickforge` at the root of that directory. The filename remains
-explicit, but the user name, source-copy directory, and preset name are not hardcoded.
-Keep the WSL target system and a Linux preset selected. A local startup item can
-also specify `remoteMachineName` as the existing WSL connection (e.g. `WSL: Ubuntu`).
+Keep `project` bound to the root `CMakeLists.txt` and omit `program` and
+`remoteMachineName`. Visual Studio resolves the executable and WSL connection from
+the selected CMake target. In the tested VS 18 installation, overriding `program`
+with `${cmake.binaryDir}/tickforge` prevented that context from resolving and caused
+`launch configuration requires a value for "${debugInfo.resolvedRemoteMachineName}"`.
+The toolbar label `WSL: Ubuntu` must not be copied into `remoteMachineName`: it is
+not a Connection Manager identifier and caused `Connection not found`.
+
+If target macros cannot be evaluated, regenerate the startup configuration from
+the selected Linux executable rather than substituting a manual executable path.
+Keep the WSL target system and a Linux preset selected.
 
 With the native WSL2 toolset, Visual Studio normally copies source into the Linux
 filesystem. Do not assume the Linux build and the Windows checkout share the same
