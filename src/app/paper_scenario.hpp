@@ -1,5 +1,7 @@
 #pragma once
 #include <tickforge/execution/execution.hpp>
+#include <tickforge/strategy/threshold.hpp>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -10,6 +12,7 @@ struct PaperScenario {
     std::int64_t initial_base_atoms;
     execution::PaperConfig config;
     std::vector<ScriptOrder> orders;
+    std::optional<strategy::ThresholdConfig> strategy;
 };
 PaperScenario load_paper_scenario(std::string_view path);
 }

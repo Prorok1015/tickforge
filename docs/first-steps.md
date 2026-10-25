@@ -39,8 +39,10 @@ Do not depend on live APIs in tests.
 5. **First paper experiment (partially implemented):** scripted market requests,
    execution interface/simulator, depth consumption, partial fills, explicit fees,
    a separate cash/BTC/reservation ledger, order/position limits, stale-data stop,
-   and a console journal. See [paper trading](paper-trading.md). Automatic strategy,
-   cost basis/PnL, daily-loss limits, and machine-readable journal export remain planned.
+   and a console journal. An offline strategy interface and threshold example now
+   generate requests through the same path. See [paper trading](paper-trading.md)
+   and [strategies](strategies.md). Cost basis/PnL, daily-loss limits, and
+   machine-readable journal export remain planned.
 6. **Reproducible Linux delivery:** CI, synthetic end-to-end example, then profiling.
 
 The remaining parts of step 5 and step 6 are planned. Each step should finish with relevant tests and updated

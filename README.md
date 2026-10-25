@@ -4,7 +4,7 @@ A C++ trading research engine for Linux with live market data, paper trading, an
 
 ## Status
 
-**Offline paper trading and public depth capture.** The C++20 CLI replays market sessions and executes scripted virtual market orders against known depth. A separate ledger tracks USDT/BTC totals, reservations, fills, and fees. Optional Binance public-depth capture records sessions and recovers a local book. Automatic strategies, PnL, real execution, and live trade capture remain planned.
+**Offline strategy experiments, paper trading, and public depth capture.** The C++20 CLI replays market sessions and executes scripted or strategy-generated virtual market orders against known depth. A separate ledger tracks USDT/BTC totals, reservations, fills, and fees. Optional Binance public-depth capture records sessions and recovers a local book. PnL, real execution, and live trade capture remain planned. See the [automatic strategy example](docs/strategies.md).
 
 ## Why tickforge?
 
@@ -35,7 +35,7 @@ and dependency/data-flow diagrams. Each production target owns a directory and a
 local `CMakeLists.txt`; `main.cpp` delegates to the application command dispatcher.
 Venue-specific market data code lives under `src/adapters/<venue>/`; the first
 adapter is `adapters/binance` (`tickforge_binance`). Replay uses the same event
-model and remains in `core`. Order execution is a separate, future responsibility.
+model and remains in `core`. Paper execution and strategies are separate components.
 For Visual Studio builds and launches targeting Linux, see [Visual Studio + WSL](docs/visual-studio-wsl.md).
 
 ## Intended architecture
@@ -121,7 +121,7 @@ Checked items below are implemented; unchecked items remain planned.
 
 - [x] Build and validate a local order book using synthetic snapshots and depth updates.
 - [x] Add an execution interface and a scripted virtual-order scenario.
-- [ ] Add a strategy interface and a simple example strategy.
+- [x] Add a strategy interface and a simple example strategy (offline replay).
 - [x] Simulate market orders with spread, available depth, and fees.
 - [x] Track total, reserved, and available USDT/BTC in a separate account ledger.
 - [ ] Add cost basis and realized/unrealized PnL.
@@ -192,10 +192,10 @@ tickforge | Market research engine
 Mode      | SIMULATION ONLY
 ```
 
-The ten default CTest checks cover startup, input validation, deterministic console output,
+The twelve default CTest checks cover startup, input validation, deterministic console output,
 snapshots, absolute updates, deletions, stale ranges, gaps, crossed books, recovery,
 decimal display, recording, and live/replay synchronization state equality. Enabling
-live capture adds an eleventh offline test for Binance JSON/metadata normalization.
+live capture adds a thirteenth offline test for Binance JSON/metadata normalization.
 Paper checks cover fees, reserves, partial fills, duplicate receipts, uncertain
 results, order/position limits, stale data, and checked monetary arithmetic.
 No network connection or credentials are needed.

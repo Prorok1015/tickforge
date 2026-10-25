@@ -2,7 +2,8 @@
 
 This stage adds market-order simulation and a separate reusable account ledger.
 It consumes existing replay sessions; it has no real order API, keys, or account
-access. There is no automatic strategy or PnL calculation yet.
+access. The separate [strategy command](strategies.md) generates automatic requests
+through the same execution/accounting path. PnL calculation remains planned.
 
 ## Run the complete example
 

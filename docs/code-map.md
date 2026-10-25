@@ -24,6 +24,10 @@ tickforge/
       CMakeLists.txt
       include/tickforge/execution/
       src/
+    strategy/                      library: tickforge_strategy (decision policies)
+      CMakeLists.txt
+      include/tickforge/strategy/   Strategy interface, View, ThresholdConfig
+      src/                         threshold policy
     console/                       library: tickforge_console
       CMakeLists.txt
       include/tickforge/console/    public presentation headers
@@ -49,6 +53,7 @@ tickforge/
     core/                          session, synchronization, and book contracts
     accounting/                    ledger and checked money arithmetic
     execution/                     fills, virtual liquidity, and risk
+    strategy/                      decisions and confirmed-inventory behavior
     console/                       exact decimal display
     adapters/binance/              Binance-shaped JSON (no network)
     app/                           CLI integration checks
@@ -69,6 +74,9 @@ flowchart TD
     App --> Console["console: tickforge_console"]
     App --> Execution["execution: tickforge_execution"]
     App --> Accounting["accounting: tickforge_accounting"]
+    App --> Strategy["strategy: tickforge_strategy"]
+    Strategy --> Accounting
+    Strategy --> Core
     Execution --> Accounting
     Execution --> Core
     Accounting --> Core
@@ -186,8 +194,8 @@ Binance adapter only reads public depth and metadata. It has no account access.
 An order-execution adapter would send orders/cancellations and consume order-status
 and fill reports. It is a separate responsibility, not implemented here. The paper
 command uses a synchronous execution interface in the current stage. The
-first implementation is a local simulator, driven by scripted requests rather
-than a strategy. A real venue execution adapter would require an explicit
+first implementation is a local simulator, driven by scripted requests or the
+offline strategy command. A real venue execution adapter would require an explicit
 later stage, authentication, reconciliation, and handling uncertain request results.
 Do not add real execution to the public market-data adapter implicitly.
 
@@ -204,7 +212,17 @@ The app's `paper_command.cpp` connects these pieces; `paper_scenario.*` reads
 experimental inputs, and `paper_reporter.*` prints the operation journal. No new
 network or console dependency is introduced into the ledger/execution libraries.
 See [paper trading](paper-trading.md) for units, scenario syntax, assumptions,
-example balances, and failure behavior. PnL and an automatic strategy remain planned.
+example balances, and failure behavior. PnL remains planned.
+
+`strategy/strategy.hpp` defines a decision interface returning an optional market
+request from a value snapshot of quotes, event time, availability, and balances.
+`threshold.hpp/.cpp` implements an inventory-aware buy/sell threshold policy. The
+app's existing `paper_command.cpp` also assembles the `strategy` command, invoking
+the policy after each simulator update and before submitting through OrderManager.
+`paper_scenario.*` validates either scripted orders or a threshold configuration.
+See [strategies](strategies.md) for the event-flow diagram, input units, assumptions,
+and a synthetic partial-buy/recovery/sell example. Strategy does not link execution,
+console, or the Binance adapter; it cannot execute its own proposals.
 
 ## Working in stages
 

@@ -1,0 +1,4 @@
+add_executable(strategy_tests strategy_tests.cpp)
+target_link_libraries(strategy_tests PRIVATE tickforge_strategy)
+tickforge_enable_warnings(strategy_tests)
+add_test(NAME strategy_contract COMMAND strategy_tests)
