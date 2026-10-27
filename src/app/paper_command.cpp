@@ -20,7 +20,7 @@ void paper_session(std::string_view session_path, std::string_view scenario_path
     if (scenario.strategy) algorithm.emplace(*scenario.strategy);
     std::ifstream input{std::string(session_path)};
     if (!input) throw std::runtime_error(std::format("cannot open session '{}'", session_path));
-    accounting::Account account(scenario.initial_quote_atoms, scenario.initial_base_atoms);
+    accounting::Account account(scenario.initial_quote_atoms, scenario.initial_base_atoms, scenario.initial_base_cost_atoms);
     execution::Simulator simulator(scenario.config);
     execution::OrderManager manager(account, simulator, scenario.config);
     std::size_t next = 0, rejected = 0, fills = 0;

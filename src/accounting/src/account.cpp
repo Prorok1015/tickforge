@@ -4,11 +4,13 @@
 
 namespace tickforge::accounting {
 
-Account::Account(std::int64_t quote_atoms, std::int64_t base_atoms)
+Account::Account(std::int64_t quote_atoms, std::int64_t base_atoms, std::int64_t base_cost_quote_atoms)
 {
-    if (quote_atoms < 0 || base_atoms < 0) throw std::invalid_argument("negative initial balance");
+    if (quote_atoms < 0 || base_atoms < 0 || base_cost_quote_atoms < 0) throw std::invalid_argument("negative initial balance");
+    if (base_atoms == 0 && base_cost_quote_atoms != 0) throw std::invalid_argument("cost basis without initial BTC");
     balances_.quote_total = quote_atoms;
     balances_.base_total = base_atoms;
+    position_.base_cost_quote = base_cost_quote_atoms;
 }
 
 std::int64_t Account::pending_buy_quantity() const
@@ -59,23 +61,32 @@ bool Account::apply_fill(const Fill& fill)
     if (reservation.closed || reservation.side != fill.side || fill.quantity_atoms > reservation.quantity_remaining)
         throw std::runtime_error("fill does not match an open order");
     auto balances = balances_;
+    auto position = position_;
     if (fill.side == Side::buy) {
         const auto cost = amount_add(fill.quote_atoms, fill.fee_quote_atoms);
         reservation.quote_remaining = amount_subtract(reservation.quote_remaining, cost);
         balances.quote_reserved = amount_subtract(balances.quote_reserved, cost);
         balances.quote_total = amount_subtract(balances.quote_total, cost);
         balances.base_total = amount_add(balances.base_total, fill.quantity_atoms);
+        position.base_cost_quote = amount_add(position.base_cost_quote, cost);
     } else {
         const auto proceeds = amount_subtract(fill.quote_atoms, fill.fee_quote_atoms);
+        // The sold share of the average cost is rounded up: rounding never adds to
+        // realized profit. Closing the whole position removes the exact remainder.
+        const auto sold_cost = fill.quantity_atoms == balances.base_total ? position.base_cost_quote
+            : amount_fraction(position.base_cost_quote, fill.quantity_atoms, balances.base_total, true);
         balances.base_reserved = amount_subtract(balances.base_reserved, fill.quantity_atoms);
         balances.base_total = amount_subtract(balances.base_total, fill.quantity_atoms);
         balances.quote_total = amount_add(balances.quote_total, proceeds);
+        position.base_cost_quote = amount_subtract(position.base_cost_quote, sold_cost);
+        position.realized_pnl_quote = signed_add(position.realized_pnl_quote, signed_subtract(proceeds, sold_cost));
     }
     reservation.quantity_remaining = amount_subtract(reservation.quantity_remaining, fill.quantity_atoms);
     // Allocation can throw; commit balances only after the receipt was stored.
     fills_.emplace(fill.id, fill);
     found->second = reservation;
     balances_ = balances;
+    position_ = position;
     return true;
 }
 

@@ -69,11 +69,14 @@ reconciliation, and asynchronous real execution are not implemented. The initial
 
 ```text
 tickforge-orders,1,BTCUSDT
-account,initial_quote_atoms,initial_base_atoms
+account,initial_quote_atoms,initial_base_atoms[,initial_base_cost_quote_atoms]
 config,fee_ppm,quantity_step_atoms,max_order_quantity_atoms,max_position_quantity_atoms,stale_after_ns
 order,after_event_ordinal,order_id,buy_or_sell,quantity_atoms,max_spend_quote_atoms
 ```
 
+The optional fourth `account` field is the total cost of the initial BTC in
+1e-8 USDT. It is required when the account starts with BTC and must be absent or
+zero otherwise, so inherited inventory never receives an implicit zero cost.
 The first three rows are mandatory and ordered. Subsequent order rows are processed
 in file order; event ordinals must be positive and nondecreasing, and order IDs must
 be positive and unique. All numeric fields contain nonnegative int64 decimal digits.

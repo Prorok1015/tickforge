@@ -45,9 +45,14 @@ PaperScenario load_paper_scenario(std::string_view path)
             const auto values = fields(line);
             if (number == 1) {
                 if (line != "tickforge-orders,1,BTCUSDT") throw std::runtime_error("unsupported scenario header");
-            } else if (number == 2 && values.size() == 3 && values[0] == "account") {
+            } else if (number == 2 && (values.size() == 3 || values.size() == 4) && values[0] == "account") {
                 result.initial_quote_atoms = integer(values[1]);
                 result.initial_base_atoms = integer(values[2]);
+                result.initial_base_cost_atoms = values.size() == 4 ? integer(values[3]) : 0;
+                if (values.size() == 3 && result.initial_base_atoms != 0)
+                    throw std::runtime_error("initial BTC requires its cost basis in USDT atoms");
+                if (result.initial_base_atoms == 0 && result.initial_base_cost_atoms != 0)
+                    throw std::runtime_error("cost basis requires initial BTC");
             } else if (number == 3 && values.size() == 6 && values[0] == "config") {
                 result.config = {integer(values[1]), integer(values[2]), integer(values[3]), integer(values[4]), integer(values[5])};
                 execution::validate_config(result.config);

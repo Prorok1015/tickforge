@@ -25,7 +25,7 @@ void routing_and_liquidity()
 {
     auto settings = config();
     Simulator simulator(settings);
-    accounting::Account account(1000000000000, 0); // 10000 USDT
+    accounting::Account account(1000000000000, 0, 0); // 10000 USDT
     OrderManager manager(account, simulator, settings);
     simulator.on_market_event(event(1, BookSnapshot{100, {{9900, 200000000}, {10000, 100000000}},
         {{10200, 200000000}, {10100, 100000000}}}));
@@ -65,7 +65,7 @@ void budget_and_rounding()
 {
     auto settings = config(); settings.quantity_step_atoms = 1000;
     Simulator simulator(settings);
-    accounting::Account account(100000000, 0);
+    accounting::Account account(100000000, 0, 0);
     OrderManager manager(account, simulator, settings);
     simulator.on_market_event(event(1, BookSnapshot{1, {{10000, 100000000}}, {{10100, 100000000}}}));
     const auto result = manager.submit({1, Side::buy, 2000, 101101});
@@ -93,7 +93,7 @@ void risk_and_freshness()
     auto settings = config(); settings.quantity_step_atoms = 1000;
     settings.max_order_quantity_atoms = 100000; settings.max_position_quantity_atoms = 150000;
     Simulator simulator(settings);
-    accounting::Account account(10000000000, 0);
+    accounting::Account account(10000000000, 0, 0);
     OrderManager manager(account, simulator, settings);
     check(!manager.submit({1, Side::buy, 100000, 100000000}).accepted, "no snapshot must block orders");
     simulator.on_market_event(event(1, BookSnapshot{100, {{10000, 100000000}}, {{10100, 100000000}}}));
@@ -129,7 +129,7 @@ void partial_sell()
 {
     const auto settings = config();
     Simulator simulator(settings);
-    accounting::Account account(0, 200000000);
+    accounting::Account account(0, 200000000, 20000000000); // 2 BTC bought at 100.00
     OrderManager manager(account, simulator, settings);
     simulator.on_market_event(event(1, BookSnapshot{1, {{10000, 100000000}}, {{10100, 100000000}}}));
     const auto result = manager.submit({1, Side::sell, 150000000, 0});
@@ -138,9 +138,12 @@ void partial_sell()
     check(account.balances().base_total == 100000000 && account.balances().base_reserved == 0 &&
           account.balances().available_base() == 100000000 && account.balances().quote_total == 9990000000,
           "partial sell must free unused BTC and charge fees only on actual fills");
+    check(account.position() == accounting::Position{10000000000, -10000000},
+          "selling at cost loses exactly the fee; half the cost remains");
     simulator.on_market_event(event(2, BookSnapshot{2, {{10000, 100000000}}, {{10100, 100000000}}}));
     check(manager.submit({2, Side::sell, 100000000, 0}).result.status == OrderStatus::filled &&
           account.balances().base_total == 0, "new snapshot replenishes known liquidity");
+    check(account.position() == accounting::Position{0, -20000000}, "closing the position removes all cost");
     simulator.on_market_event(event(3, BookSnapshot{3, {}, {}}));
     const auto before = account.balances();
     check(manager.submit({3, Side::buy, 1, 1}).result.status == OrderStatus::cancelled && account.balances() == before,
@@ -178,7 +181,7 @@ public:
 void uncertain_results()
 {
     const auto settings = config();
-    accounting::Account account(100, 0);
+    accounting::Account account(100, 0, 0);
     UncertainExecution execution;
     OrderManager manager(account, execution, settings);
     rejects([&] { manager.submit({1, Side::buy, 1, 10}); });
@@ -189,7 +192,7 @@ void uncertain_results()
     rejects([&] { other.submit({2, Side::buy, 1, 10}); });
     check(account.balances().quote_reserved == 20 && account.balances().base_total == 0,
           "malformed result must not silently release reserves or invent BTC");
-    accounting::Account other_account(100, 0);
+    accounting::Account other_account(100, 0, 0);
     DuplicateExecution duplicate;
     OrderManager duplicate_manager(other_account, duplicate, settings);
     const auto report = duplicate_manager.submit({1, Side::buy, 1, 10});
