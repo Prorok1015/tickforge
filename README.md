@@ -134,10 +134,18 @@ Checked items below are implemented; unchecked items remain planned.
 ### 4. More realistic execution
 
 - [ ] Model order submission and cancellation delays.
+- [ ] Make the execution interface asynchronous: orders live across market events
+  (submitted, accepted, partially filled, terminal) instead of returning one result.
 - [ ] Add limit orders, partial fills, and queue assumptions.
 - [ ] Compare results under different execution assumptions.
 - [x] Block decisions on stale or invalid depth.
 - [ ] Add an emergency trading stop.
+- [ ] Add a daily-loss limit based on realized and unrealized PnL.
+- [ ] Persist ledger state and open orders; restore them after a restart.
+
+The asynchronous lifecycle, risk stops, and persistence are simulation features in
+their own right. They are also the parts a later live adapter would depend on, so
+the simulator should exercise them first.
 
 ### 5. Linux performance research
 
@@ -149,6 +157,21 @@ Checked items below are implemented; unchecked items remain planned.
 ### 6. Optional future live execution
 
 A live execution adapter may be explored after the simulator, accounting, and risk controls have been validated. This is a later research direction; real order submission is outside the initial scope.
+
+The long-term idea is a staged promotion of each strategy, with the same strategy
+code at every stage:
+
+1. **Simulation:** recorded and replayed sessions; the strategy must stay profitable
+   after fees, slippage, and delays on sessions it was not tuned on.
+2. **Exchange testnet:** real order lifecycle and connectivity, no real money.
+3. **Real funds:** minimal amounts first.
+
+A web interface could later show sessions and results and switch a strategy between
+stages. None of this is planned work yet. Prerequisites beyond sections 4-5 would
+include a separate authenticated execution adapter (never part of the public
+market-data adapter), client order IDs for safe retries, reconciliation of orders and
+balances against the exchange after disconnects, venue order filters and rate limits,
+restricted trade-only API keys, and monitoring with alerts.
 
 ## Validation plan
 
