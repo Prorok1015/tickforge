@@ -1,4 +1,6 @@
-add_library(tickforge_accounting include/tickforge/accounting/account.hpp src/account.cpp)
+add_library(tickforge_accounting
+    include/tickforge/accounting/account.hpp src/account.cpp
+    include/tickforge/accounting/valuation.hpp src/valuation.cpp)
 target_include_directories(tickforge_accounting PUBLIC include)
 target_link_libraries(tickforge_accounting PUBLIC tickforge_core)
 tickforge_enable_warnings(tickforge_accounting)

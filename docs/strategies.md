@@ -16,7 +16,8 @@ paper trading and these arguments:
 This is a deterministic teaching example. Thresholds are experimental inputs,
 not a prediction or evidence of profitability. The command replays a file as fast
 as possible; it does not trade on the live network stream. Live capture can produce
-the input file for a later experiment. PnL reporting remains a separate next stage.
+the input file for a later experiment. The summary reports realized/unrealized PnL
+using the rules in [paper trading](paper-trading.md); the policy itself does not use PnL.
 
 ## Components and event order
 
@@ -93,6 +94,10 @@ actually held. The final trade triggers no order. Expected result:
 Paper complete | 2 requests | 0 rejected | 2 fills | fees=0.00020200 USDT
   USDT    | total=100.00179800 | reserved=0.00000000 | available=100.00179800
   BTC     | total=0.00000000 | reserved=0.00000000 | available=0.00000000
+  PNL     | cost basis=0.00000000 USDT | average cost=unavailable (no BTC) | realized=+0.00179800 USDT
+  MARK    | bid 102.00 USDT at event #4 (before exit fees and depth)
+  VALUE   | BTC=0.00000000 USDT | equity=100.00179800 USDT
+  TOTAL   | realized=+0.00179800 USDT | unrealized=+0.00000000 USDT | total=+0.00179800 USDT
 ```
 
 Tests verify decisions after partial/rejected execution, invalid data, reserves,

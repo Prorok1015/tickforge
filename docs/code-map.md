@@ -16,7 +16,7 @@ tickforge/
       CMakeLists.txt
       include/tickforge/core/       public domain/session headers
       src/                         implementations
-    accounting/                    library: tickforge_accounting (balances/reserves)
+    accounting/                    library: tickforge_accounting (balances/reserves/PnL)
       CMakeLists.txt
       include/tickforge/accounting/
       src/
@@ -51,7 +51,7 @@ tickforge/
   tests/
     CMakeLists.txt
     core/                          session, synchronization, and book contracts
-    accounting/                    ledger and checked money arithmetic
+    accounting/                    ledger, PnL valuation, and checked money arithmetic
     execution/                     fills, virtual liquidity, and risk
     strategy/                      decisions and confirmed-inventory behavior
     console/                       exact decimal display
@@ -202,7 +202,9 @@ Do not add real execution to the public market-data adapter implicitly.
 ## Paper trading components
 
 `accounting/account.hpp/.cpp` owns total/reserved/available USDT and BTC, order
-reservations, and receipt deduplication. `execution/execution.hpp` defines the
+reservations, receipt deduplication, average cost basis, and realized PnL.
+`accounting/valuation.hpp/.cpp` marks the position at a price: market value,
+unrealized/total PnL, equity, and average cost. They are pure functions of the ledger. `execution/execution.hpp` defines the
 synchronous interface and explicit paper settings. `simulator.hpp/.cpp` consumes
 replay events, guards book freshness, and simulates fills using separate virtual
 liquidity counters. `order_manager.hpp/.cpp` performs risk checks, reserves funds,
@@ -212,7 +214,7 @@ The app's `paper_command.cpp` connects these pieces; `paper_scenario.*` reads
 experimental inputs, and `paper_reporter.*` prints the operation journal. No new
 network or console dependency is introduced into the ledger/execution libraries.
 See [paper trading](paper-trading.md) for units, scenario syntax, assumptions,
-example balances, and failure behavior. PnL remains planned.
+example balances, PnL rules, and failure behavior.
 
 `strategy/strategy.hpp` defines a decision interface returning an optional market
 request from a value snapshot of quotes, event time, availability, and balances.

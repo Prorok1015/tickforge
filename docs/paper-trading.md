@@ -3,7 +3,8 @@
 This stage adds market-order simulation and a separate reusable account ledger.
 It consumes existing replay sessions; it has no real order API, keys, or account
 access. The separate [strategy command](strategies.md) generates automatic requests
-through the same execution/accounting path. PnL calculation remains planned.
+through the same execution/accounting path. The ledger also keeps an average cost
+basis and realized PnL; the report adds unrealized PnL at the last trusted bid.
 
 ## Run the complete example
 
@@ -30,11 +31,15 @@ request during a book gap, and trading after snapshot recovery. Expected results
 Paper complete | 8 requests | 1 rejected | 8 fills | fees=0.78001350 USDT
   USDT    | total=609.20148650 | reserved=0.00000000 | available=609.20148650
   BTC     | total=0.00600000 | reserved=0.00000000 | available=0.00600000
+  PNL     | cost basis=390.40093949 USDT | average cost=65066.83 USDT | realized=-0.39757401 USDT
+  MARK    | bid 65000.00 USDT at event #8 (before exit fees and depth)
+  VALUE   | BTC=390.00000000 USDT | equity=999.20148650 USDT
+  TOTAL   | realized=-0.39757401 USDT | unrealized=-0.40093949 USDT | total=-0.79851350 USDT
 ```
 
-This is an accounting result, not a profitability report. BTC remaining in the
-account is not valued or included in a PnL number. Redirect stdout to a local log
-if you want to save the human-readable operation journal.
+The total is the change in equity: 999.20148650 - 1000 USDT. It is a result under
+the stated execution assumptions, not evidence of a profitable method. Redirect
+stdout to a local log if you want to save the human-readable operation journal.
 
 ## Component boundaries
 
@@ -136,8 +141,8 @@ are not fully emulated in this stage.
 6. Cancel any unfilled remainder immediately and release its unused reservation.
    `partially_filled` is terminal here: the remaining quantity is cancelled.
 
-No shorts, leverage, limit orders, resting orders, simulated delays, daily-loss
-limits, or PnL are implemented. A fresh sequence is not enough on its own: depth is
+No shorts, leverage, limit orders, resting orders, simulated delays, or daily-loss
+limits are implemented. A fresh sequence is not enough on its own: depth is
 stale once the current replay offset exceeds the last valid depth observation by
 `stale_after_ns`. Trades and stale duplicate ranges do not refresh this observation.
 Gap/disconnect states and unbridged live snapshots block execution.
@@ -153,6 +158,41 @@ reservation and aborts the run. It must not assume that an uncertain request was
 rejected. A confirmed rejection, in contrast, releases the reservation. Recovering
 such an uncertain state through exchange reconciliation is a future real-execution
 task; no real adapter is supplied by this stage.
+
+## Cost basis and PnL
+
+The ledger uses the **average cost** method for the single BTC position:
+
+- A buy adds its notional **plus its fee** to the position cost.
+- A sale removes the sold share of that cost: `cost * sold / held`, rounded up so
+  rounding never adds to realized profit. Selling the whole position removes the
+  exact remaining cost, so no rounding residue survives a closed position.
+- Realized PnL changes only on sales: proceeds after the sale fee minus removed cost.
+  It is therefore net of both commissions of a round trip.
+- Initial BTC requires an explicit cost in the scenario `account` row.
+
+The cost is stored as a total in 1e-8 USDT rather than as an average price, so
+partial sales do not accumulate price-rounding error. The journal prints the
+average cost (price units, rounded up) for reading only.
+
+Unrealized PnL is reported, not stored. The app remembers the last best bid seen
+while execution was available, because recordings end with a shutdown reset that
+hides quotes. Held BTC is valued at that bid, rounded down like a sale:
+
+```text
+unrealized = held BTC * mark bid - remaining cost
+total      = realized + unrealized = equity - initial equity
+equity     = USDT total + held BTC * mark bid
+```
+
+Initial equity is initial USDT plus the declared cost of initial BTC. The mark is
+the price a market sale would start at; it excludes the exit fee and the depth a
+real sale might cross, so it is optimistic for large positions. Without BTC no mark
+is needed. With BTC and no trusted bid in the whole session, unrealized PnL is
+reported as unavailable instead of being guessed. Strategies do not see PnL yet.
+
+Tests check that equity change always equals realized plus unrealized PnL, across
+partial sales, several marks, and inherited inventory.
 
 ## Virtual liquidity policy
 

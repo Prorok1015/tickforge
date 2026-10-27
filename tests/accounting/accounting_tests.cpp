@@ -1,4 +1,5 @@
 #include <tickforge/accounting/account.hpp>
+#include <tickforge/accounting/valuation.hpp>
 #include <tickforge/core/amounts.hpp>
 #include <cstdio>
 #include <format>
@@ -135,6 +136,29 @@ int main()
         inherited.reserve({1, Side::sell, 100000000, 0});
         inherited.apply_fill({1, 1, Side::sell, 6600000, 100000000, 6600000000000, 0});
         check(inherited.position() == Position{0, 100000000000}, "initial inventory uses its declared cost");
+
+        // Valuation: equity - initial equity == realized + unrealized after any fills.
+        Account marked(100000000000, 0, 0); // 1000 USDT
+        check(!average_cost_price(marked.balances(), marked.position()), "flat account has no average cost");
+        marked.reserve({1, Side::buy, 300000, 30000000000});
+        marked.apply_fill({1, 1, Side::buy, 6500100, 100000, 6500100000, 6500100});
+        marked.apply_fill({2, 1, Side::buy, 6500200, 200000, 13000400000, 13000400});
+        marked.release(1);
+        check(average_cost_price(marked.balances(), marked.position()) == 6506667, "average cost includes fees, rounded up");
+        marked.reserve({2, Side::sell, 100000, 0});
+        marked.apply_fill({3, 2, Side::sell, 6600000, 100000, 6600000000, 6600000});
+        marked.release(2);
+        for (const std::int64_t mark : {6000000, 6500000, 7000000}) {
+            const auto value = value_at(marked, mark);
+            check(value.market_value_quote == mark * 200000 / 100, "BTC is valued at the mark");
+            check(value.unrealized_pnl_quote == value.market_value_quote - marked.position().base_cost_quote,
+                  "unrealized PnL is value minus remaining cost");
+            check(value.equity_quote - 100000000000 == value.total_pnl_quote &&
+                  value.total_pnl_quote == marked.position().realized_pnl_quote + value.unrealized_pnl_quote,
+                  "equity change equals realized plus unrealized PnL");
+        }
+        check(value_at(marked, 6000000).unrealized_pnl_quote < 0, "a price drop is an unrealized loss");
+        rejects([&] { value_at(marked, 0); });
         std::fputs("Accounting and checked amount checks passed\n", stdout);
         return 0;
     } catch (const std::exception& error) {

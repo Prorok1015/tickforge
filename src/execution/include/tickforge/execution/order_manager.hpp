@@ -11,6 +11,7 @@ struct OrderReport {
     ExecutionResult result;
     accounting::Balances reserved_balances;
     accounting::Balances final_balances;
+    accounting::Position final_position;
 };
 
 class OrderManager {

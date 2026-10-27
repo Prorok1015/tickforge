@@ -4,7 +4,7 @@ A C++ trading research engine for Linux with live market data, paper trading, an
 
 ## Status
 
-**Offline strategy experiments, paper trading, and public depth capture.** The C++20 CLI replays market sessions and executes scripted or strategy-generated virtual market orders against known depth. A separate ledger tracks USDT/BTC totals, reservations, fills, and fees. Optional Binance public-depth capture records sessions and recovers a local book. PnL, real execution, and live trade capture remain planned. See the [automatic strategy example](docs/strategies.md).
+**Offline strategy experiments, paper trading, and public depth capture.** The C++20 CLI replays market sessions and executes scripted or strategy-generated virtual market orders against known depth. A separate ledger tracks USDT/BTC totals, reservations, fills, fees, average cost basis, and realized/unrealized PnL. Optional Binance public-depth capture records sessions and recovers a local book. Real execution and live trade capture remain planned. See the [automatic strategy example](docs/strategies.md).
 
 ## Why tickforge?
 
@@ -124,7 +124,7 @@ Checked items below are implemented; unchecked items remain planned.
 - [x] Add a strategy interface and a simple example strategy (offline replay).
 - [x] Simulate market orders with spread, available depth, and fees.
 - [x] Track total, reserved, and available USDT/BTC in a separate account ledger.
-- [ ] Add cost basis and realized/unrealized PnL.
+- [x] Add cost basis and realized/unrealized PnL.
 - [x] Add position and order-size limits.
 - [x] Print an operation journal and final account summary.
 - [ ] Export a machine-readable trade journal and session summary.
@@ -223,8 +223,9 @@ Run the complete virtual-account example (works in native Windows and Linux buil
 ```
 
 It starts with 1000 virtual USDT and finishes with **609.20148650 USDT and 0.006 BTC**,
-eight fills, one rejected request, and zero outstanding reserves. These are balances,
-not a PnL calculation. In Visual Studio, use:
+eight fills, one rejected request, and zero outstanding reserves. Marked at the last
+trusted bid (65000.00), the result is **-0.79851350 USDT**: -0.39757401 realized and
+-0.40093949 unrealized. In Visual Studio, use:
 
 ```json
 "args": ["paper", "examples/synthetic-book.csv", "examples/paper-orders.csv"]

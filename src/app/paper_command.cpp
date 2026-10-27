@@ -25,6 +25,7 @@ void paper_session(std::string_view session_path, std::string_view scenario_path
     execution::OrderManager manager(account, simulator, scenario.config);
     std::size_t next = 0, rejected = 0, fills = 0;
     std::int64_t fees = 0;
+    std::optional<Mark> mark;
     paper_header(session_path, scenario_path, scenario);
     if (algorithm) write_console(std::format(
         "Strategy  | threshold | buy ask <= {} USDT | sell bid >= {} USDT\n"
@@ -41,6 +42,9 @@ void paper_session(std::string_view session_path, std::string_view scenario_path
     replay(input, [&](const MarketEvent& event) {
         simulator.on_market_event(event);
         paper_market(event, simulator.available());
+        // Recordings end with a shutdown reset, so keep the last trusted bid for valuation.
+        if (const auto bid = simulator.book().best_bid(); bid && simulator.available())
+            mark = Mark{bid->price_atoms, event.time.ordinal};
         if (algorithm) {
             const auto order = algorithm->on_market({event.time, simulator.available(),
                 simulator.book().best_bid(), simulator.book().best_ask(), account.balances()});
@@ -56,6 +60,6 @@ void paper_session(std::string_view session_path, std::string_view scenario_path
         }
     });
     if (!automatic && next != scenario.orders.size()) throw std::runtime_error("scenario references an event beyond the recorded session");
-    paper_summary(account, next, rejected, fills, fees);
+    paper_summary(account, next, rejected, fills, fees, mark);
 }
 } // namespace tickforge::app

@@ -9,7 +9,11 @@ foreach(iteration RANGE 1 2)
             "total=609.20148650 | reserved=0.00000000 | available=609.20148650"
             "total=0.00600000 | reserved=0.00000000 | available=0.00600000"
             "quantity=0.00153000 BTC" "quantity=0.00047000 BTC"
-            "PARTIAL (remainder cancelled)" "book unavailable or stale" "price=64998.00 USDT")
+            "PARTIAL (remainder cancelled)" "book unavailable or stale" "price=64998.00 USDT"
+            "cost basis=390.40093949 USDT | average cost=65066.83 USDT | realized=-0.39757401 USDT"
+            "MARK    | bid 65000.00 USDT at event #8"
+            "equity=999.20148650 USDT"
+            "realized=-0.39757401 USDT | unrealized=-0.40093949 USDT | total=-0.79851350 USDT")
         string(FIND "${output}" "${expected}" position)
         if(position EQUAL -1)
             message(FATAL_ERROR "Paper output missing: ${expected}\n${output}")
@@ -36,6 +40,21 @@ foreach(rows IN ITEMS "order,999,1,buy,1000,100000000\n"
         message(FATAL_ERROR "Invalid/untriggered scenario must fail: ${rows}")
     endif()
 endforeach()
+
+foreach(account IN ITEMS "account,100000000000,100000" "account,100000000000,0,1" "account,1,2,3,4")
+    file(WRITE "${scratch}" "tickforge-orders,1,BTCUSDT\n${account}\nconfig,1000,1000,1000000,1000000,5000000000\n")
+    execute_process(COMMAND "${PROGRAM}" paper "${SESSION}" "${scratch}"
+        RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(NOT "${result}" STREQUAL "1" OR output MATCHES "Paper complete")
+        message(FATAL_ERROR "Initial BTC must have exactly one explicit cost basis: ${account}")
+    endif()
+endforeach()
+file(WRITE "${scratch}" "tickforge-orders,1,BTCUSDT\naccount,0,100000,6500100000\nconfig,1000,1000,1000000,1000000,5000000000\n")
+execute_process(COMMAND "${PROGRAM}" paper "${SESSION}" "${scratch}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT "${result}" STREQUAL "0" OR NOT output MATCHES "unrealized=-0.00100000 USDT")
+    message(FATAL_ERROR "Inherited BTC must be marked against its declared cost: ${output} ${error}")
+endif()
 
 file(READ "${SCENARIO}" scenario_text)
 string(REPLACE "\r\n" "\n" scenario_text "${scenario_text}")

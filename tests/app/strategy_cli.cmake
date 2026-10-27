@@ -7,7 +7,9 @@ foreach(iteration RANGE 1 2)
     foreach(expected IN ITEMS "Signal    | event #1 | BUY ask" "Signal    | event #3 | SELL bid"
             "Paper complete | 2 requests | 0 rejected | 2 fills | fees=0.00020200 USDT"
             "total=100.00179800" "quantity=0.00100000 BTC"
-            "Market #2 | elapsed=100 ns | execution BLOCKED")
+            "Market #2 | elapsed=100 ns | execution BLOCKED"
+            "cost basis=0.10010000 USDT | average cost=100.10 USDT | realized=+0.00000000 USDT"
+            "realized=+0.00179800 USDT | unrealized=+0.00000000 USDT | total=+0.00179800 USDT")
         string(FIND "${output}" "${expected}" position)
         if(position EQUAL -1)
             message(FATAL_ERROR "Missing strategy result: ${expected}\n${output}")
@@ -26,7 +28,8 @@ file(WRITE "${prefix}" "${market_header}\n${first_snapshot}\nend,1\n")
 execute_process(COMMAND "${PROGRAM}" strategy "${prefix}" "${SCENARIO}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT "${result}" STREQUAL "0" OR NOT output MATCHES "1 requests"
-        OR output MATCHES "SELL bid" OR NOT output MATCHES "total=0.00100000")
+        OR output MATCHES "SELL bid" OR NOT output MATCHES "total=0.00100000"
+        OR NOT output MATCHES "unrealized=-0.00110000 USDT")
     message(FATAL_ERROR "Prefix replay must hold the partial buy without a future sell: ${output} ${error}")
 endif()
 execute_process(COMMAND "${PROGRAM}" paper "${SESSION}" "${SCENARIO}" RESULT_VARIABLE result)

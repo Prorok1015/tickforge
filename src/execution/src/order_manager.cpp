@@ -12,7 +12,7 @@ OrderReport OrderManager::submit(const MarketOrder& order)
 {
     const auto reject = [&](std::string reason) {
         return OrderReport{order, false, {order.id, OrderStatus::rejected, {}, order.quantity_atoms, std::move(reason)},
-            account_.balances(), account_.balances()};
+            account_.balances(), account_.balances(), account_.position()};
     };
     if (order.id <= 0 || !submitted_.insert(order.id).second) return reject("invalid or duplicate order ID");
     if (order.quantity_atoms <= 0 || order.quantity_atoms % config_.quantity_step_atoms != 0 ||
@@ -55,6 +55,6 @@ OrderReport OrderManager::submit(const MarketOrder& order)
     candidate.release(order.id);
     account_ = std::move(candidate);
     result.fills = std::move(confirmed);
-    return {order, true, std::move(result), reserved, account_.balances()};
+    return {order, true, std::move(result), reserved, account_.balances(), account_.position()};
 }
 } // namespace tickforge::execution
