@@ -1,10 +1,11 @@
-# Session formats v1, v2, and v3
+# Session formats v1 to v4
 
 These small offline formats carry normalized market events for Binance Spot BTCUSDT.
 They are not Binance wire payloads or a complete live capture format. All checked-in
 examples are synthetic. Version 1 remains supported unchanged for trades; version 2
 adds order book snapshots and depth updates. Version 3 adds capture lifecycle,
-pending snapshots, and a mandatory completion footer. Execution simulation is not implemented.
+pending snapshots, and a mandatory completion footer. Version 4 adds the venue trade
+ID and aggressor side to trade rows. Live capture writes version 4.
 
 The first line for v1 is:
 
@@ -121,6 +122,29 @@ for an empty completed session). Missing/mismatched footers or trailing rows are
 errors. Rows may already have been delivered when an incomplete file is detected;
 only a successful exit confirms complete input. Flushes protect against application
 buffer loss but are not a disk durability guarantee (`fsync` is not implemented).
+
+## Version 4 trades
+
+The header uses `4`. Everything in version 3 is unchanged except the trade row, which
+gains two required fields:
+
+```text
+trade,ordinal,exchange_ns,receive_unix_ns,receive_elapsed_ns,price_atoms,quantity_atoms,trade_id,aggressor
+```
+
+- `trade_id` is the venue's positive trade ID. Binance IDs are consecutive per symbol,
+  so a jump means trades were missed, typically during a reconnect.
+- `aggressor` is `buy` or `sell`: the side that crossed the spread. A buy aggressor
+  lifted asks and a sell aggressor hit bids. Binance reports `m` (buyer is maker); `m`
+  true means a sell aggressor. A resting simulated buy order can only be filled by a
+  sell aggressor at its price, which is why the side matters for limit orders.
+- For live trades `exchange_ns` is the trade time `T`, not the event time `E`.
+
+Versions 1-3 keep seven-field trade rows; their trades have an unknown ID and side.
+Trades never change book quantities and never refresh depth staleness, in any version.
+Replay reports each trade's ID and side and counts ID gaps or reorders in its summary
+(`Trade feed | N ID gaps or reorders`). A trade gap leaves the book valid but makes
+traded volume at a price incomplete; it is reported, not treated as a book reset.
 
 The live adapter checks a five-second depth timeout and records resets; offline
 replay follows those recorded lifecycle events without consulting wall-clock time.

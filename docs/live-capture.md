@@ -1,8 +1,7 @@
-# Public Binance depth capture
+# Public Binance depth and trade capture
 
-This milestone captures **BTCUSDT spot depth only** through public market-data-only
-hosts. It does not subscribe to trades yet, authenticate, accept keys, or submit
-orders. The resulting normalized session is readable by the same offline replay
+This milestone captures **BTCUSDT spot depth and trades** through public
+market-data-only hosts. It does not authenticate, accept keys, or submit orders. The resulting normalized session is readable by the same offline replay
 command. Market records are not included in the repository.
 
 The adapter lives in `src/adapters/binance/`, builds as `tickforge_binance`, and
@@ -57,13 +56,24 @@ verified; it also needs the optional dependencies and a usable TLS certificate s
    fixed integer representation. Values or metadata that cannot be represented
    exactly are rejected. This is validation of units/lattice, not order eligibility:
    order-size limits, minimum notional, and execution fees are not modeled yet.
-2. Open `wss://data-stream.binance.vision/ws/btcusdt@depth@100ms`.
+2. Open one combined stream,
+   `wss://data-stream.binance.vision/stream?streams=btcusdt@depth@100ms/btcusdt@trade`.
+   Each message names its stream; depth and trades are recorded in the single order
+   in which this connection delivered them, so replay sees a trade and the depth
+   change it caused in receipt order. One connection also means one reconnect path
+   and one shared reset. Individual `@trade` events are used rather than `@aggTrade`:
+   each carries a consecutive ID, so missing trades are detectable, at the cost of
+   more messages (tens per second for BTCUSDT).
 3. On the first depth event, request a REST snapshot with up to 5000 levels per side.
    Continue reading, recording, and buffering WebSocket events while REST is pending.
 4. Record the snapshot when received. The shared `BookTracker` combines it with
    buffered events and waits for a depth range covering the next required ID.
    Quotes remain hidden until this bridge is established. If the snapshot is too
    old, request a new one on a subsequent depth event.
+   Trades are recorded as they arrive (version 4 rows with ID and aggressor). They do
+   not touch the book and do not count as depth activity: the five-second staleness
+   check uses depth messages only, because a quiet market can legitimately have no
+   trades and a live trade stream does not prove that depth updates still arrive.
 5. Apply later ranges, ignore covered IDs, and invalidate on a sequence gap. Fetch
    a fresh snapshot while continuing to receive events.
 

@@ -88,6 +88,21 @@ int main()
         try { tickforge::replay(damaged, [&](const auto&) { ++delivered; }); }
         catch (const std::runtime_error&) { failed = true; }
         require(failed && delivered == 1); // no preloading/rollback after a future error
+
+        // v4: trades carry the venue trade ID and the aggressor side; v1-v3 trades stay unknown.
+        const std::string header4 = "tickforge,4,BINANCE_SPOT,BTCUSDT,price_scale=100,quantity_scale=100000000\n";
+        std::vector<tickforge::Trade> trades;
+        std::istringstream v4(header4 + "trade,1,0,0,0,6500000,100,77,buy\ntrade,2,0,0,0,6499999,200,78,sell\nend,2\n");
+        tickforge::replay(v4, [&](const auto& event) { trades.push_back(std::get<tickforge::Trade>(event.data)); });
+        require(trades.size() == 2 && trades[0].trade_id == 77 && trades[0].aggressor == tickforge::Aggressor::buy &&
+                trades[1].aggressor == tickforge::Aggressor::sell);
+        trades.clear();
+        std::istringstream v3(header2 + "trade,1,0,0,0,100,1\n");
+        tickforge::replay(v3, [&](const auto& event) { trades.push_back(std::get<tickforge::Trade>(event.data)); });
+        require(trades.size() == 1 && trades[0].trade_id == 0 && trades[0].aggressor == tickforge::Aggressor::unknown);
+        for (const auto* row : {"trade,1,0,0,0,100,1", "trade,1,0,0,0,100,1,0,buy", "trade,1,0,0,0,100,1,5,maker",
+             "trade,1,0,0,0,100,1,5,BUY", "trade,1,0,0,0,100,1,-5,buy", "trade,1,0,0,0,100,1,5,buy,extra"})
+            rejects(header4 + row + "\nend,1\n");
         std::fputs("Replay contract checks passed\n", stdout);
         return 0;
     } catch (const std::exception& error) {

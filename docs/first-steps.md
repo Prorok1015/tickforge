@@ -34,9 +34,10 @@ Do not depend on live APIs in tests.
    updates, deletion, best quotes/spread, invalidation, and recovery tests using
    synthetic venue-shaped fixtures. Human-readable CLI shows per-event book state.
 4. **Public depth capture (implemented):** optional Boost.Beast/OpenSSL/nlohmann-json
-   adapter for Binance Spot BTCUSDT, normalized v3 recording, snapshot bridging,
+   adapter for Binance Spot BTCUSDT, normalized v4 recording, snapshot bridging,
    sequencing, stale-depth detection, bounded reconnects, and fresh snapshots.
-   Receipt order is preserved through capture/replay. Trade capture is still planned.
+   Receipt order is preserved through capture/replay. Trades are captured on the
+   same combined stream with their ID and aggressor side.
    See [live capture](live-capture.md).
 5. **First paper experiment (partially implemented):** scripted market requests,
    execution interface/simulator, depth consumption, partial fills, explicit fees,

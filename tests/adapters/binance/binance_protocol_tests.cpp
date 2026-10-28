@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <format>
 #include <stdexcept>
+#include <variant>
 
 namespace {
 void check(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
@@ -43,6 +44,40 @@ int main()
         rejects([&] { parse_instrument(R"({"symbols":[]})"); });
         rejects([&] { parse_snapshot(R"({"lastUpdateId":1,"bids":[["0","1"]],"asks":[]})", rules); });
         check(is_server_shutdown(R"({"e":"serverShutdown","E":1})"), "shutdown must be recognized");
+        check(is_server_shutdown(R"({"stream":"btcusdt@trade","data":{"e":"serverShutdown","E":1}})"),
+              "shutdown inside a combined-stream wrapper must be recognized");
+        check(!is_server_shutdown(R"({"stream":"btcusdt@trade","data":{"e":"trade"}})"), "a trade is not a shutdown");
+
+        // Trades: "m" = buyer is maker, so the seller crossed the spread.
+        const auto sold = parse_trade(R"({"e":"trade","E":2000,"s":"BTCUSDT","t":12345,"p":"65000.01","q":"0.00150000","T":1999,"m":true,"M":true})", rules, exchange);
+        check(sold.price_atoms == 6500001 && sold.quantity_atoms == 150000 && sold.trade_id == 12345 &&
+              sold.aggressor == tickforge::Aggressor::sell && exchange == 1999000000,
+              "trade fields, aggressor, and trade time must normalize");
+        const auto bought = parse_trade(R"({"e":"trade","E":2000,"s":"BTCUSDT","t":12346,"p":"65000.02","q":"0.001","T":2000,"m":false,"M":true})", rules, exchange);
+        check(bought.aggressor == tickforge::Aggressor::buy, "buyer as taker is a buy aggressor");
+        for (const auto* body : {
+             R"({"e":"trade","s":"ETHUSDT","t":1,"p":"1.00","q":"0.001","T":1,"m":true})",
+             R"({"e":"trade","s":"BTCUSDT","t":0,"p":"1.00","q":"0.001","T":1,"m":true})",
+             R"({"e":"trade","s":"BTCUSDT","t":-1,"p":"1.00","q":"0.001","T":1,"m":true})",
+             R"({"e":"trade","s":"BTCUSDT","t":1,"p":"1.00","q":"0.00000001","T":1,"m":true})",
+             R"({"e":"trade","s":"BTCUSDT","t":1,"p":"0.00","q":"0.001","T":1,"m":true})",
+             R"({"e":"trade","s":"BTCUSDT","t":1,"p":"1.00","q":"0.001","T":1,"m":"yes"})",
+             R"({"e":"trade","s":"BTCUSDT","t":1,"p":"1.00","q":"0.001","m":true})",
+             R"({"e":"depthUpdate","s":"BTCUSDT","t":1,"p":"1.00","q":"0.001","T":1,"m":true})"})
+            rejects([&] { parse_trade(body, rules, exchange); });
+
+        // Combined stream: one connection, dispatched by stream name.
+        const auto from_trade = parse_stream_message(R"({"stream":"btcusdt@trade","data":{"e":"trade","E":5,"s":"BTCUSDT","t":7,"p":"65000.00","q":"0.001","T":4,"m":false,"M":true}})", rules);
+        check(std::holds_alternative<tickforge::Trade>(from_trade.data) && from_trade.exchange_ns == 4000000 &&
+              std::get<tickforge::Trade>(from_trade.data).trade_id == 7, "trade stream message must yield a trade");
+        const auto from_depth = parse_stream_message(R"({"stream":"btcusdt@depth@100ms","data":{"e":"depthUpdate","s":"BTCUSDT","E":3,"U":5,"u":6,"b":[],"a":[]}})", rules);
+        check(std::holds_alternative<tickforge::BookUpdate>(from_depth.data) && from_depth.exchange_ns == 3000000,
+              "depth stream message must yield a book update");
+        for (const auto* body : {
+             R"({"stream":"btcusdt@aggTrade","data":{"e":"aggTrade"}})",
+             R"({"stream":"btcusdt@trade","data":{"e":"depthUpdate","s":"BTCUSDT","E":3,"U":5,"u":6,"b":[],"a":[]}})",
+             R"({"e":"trade","s":"BTCUSDT","t":1,"p":"1.00","q":"0.001","T":1,"m":true})"})
+            rejects([&] { parse_stream_message(body, rules); });
         std::fputs("Binance protocol checks passed\n", stdout);
         return 0;
     } catch (const std::exception& error) {

@@ -4,7 +4,7 @@ A C++ trading research engine for Linux with live market data, paper trading, an
 
 ## Status
 
-**Offline strategy experiments, paper trading, and public depth capture.** The C++20 CLI replays market sessions and executes scripted or strategy-generated virtual market orders against known depth. A separate ledger tracks USDT/BTC totals, reservations, fills, fees, average cost basis, and realized/unrealized PnL. Optional Binance public-depth capture records sessions and recovers a local book. Real execution and live trade capture remain planned. See the [automatic strategy example](docs/strategies.md).
+**Offline strategy experiments, paper trading, and public depth capture.** The C++20 CLI replays market sessions and executes scripted or strategy-generated virtual market orders against known depth. A separate ledger tracks USDT/BTC totals, reservations, fills, fees, average cost basis, and realized/unrealized PnL. Optional Binance public capture records depth and trades in one session and recovers a local book. Real execution remains planned. See the [automatic strategy example](docs/strategies.md).
 
 ## Why tickforge?
 
@@ -105,7 +105,8 @@ Checked items below are implemented; unchecked items remain planned.
 
 - [x] Select one venue and instrument.
 - [x] Establish a Linux C++ build and basic checks.
-- [x] Connect to the public depth feed (trade stream still planned).
+- [x] Connect to the public depth feed.
+- [x] Record public trades with ID and aggressor side on the same stream.
 - [x] Record depth and lifecycle events with timestamps and ordering metadata.
 - [x] Detect disconnects and sequence gaps; implement bounded recovery.
 

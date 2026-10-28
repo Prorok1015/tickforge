@@ -116,7 +116,7 @@ CMake carries that link requirement automatically.
 | `order_book.hpp` / `.cpp` | Known price levels in ordered maps, absolute-size updates, best bid/ask, spread, and range validation. |
 | `book_tracker.hpp` / `.cpp` | Decides when the book may be exposed. Buffers depth around REST snapshots, establishes a stream bridge, and hides quotes after resets/gaps. |
 | `recorder.hpp` / `.cpp` | Creates a new recording exclusively, writes normalized events in order, flushes them, and marks successful completion with a footer. |
-| `replay.hpp` / `.cpp` | Reads and validates v1/v2/v3 sessions; invokes a callback once per event in recorded order. No sleeping or network access. |
+| `replay.hpp` / `.cpp` | Reads and validates v1-v4 sessions; invokes a callback once per event in recorded order. No sleeping or network access. |
 | `units.hpp` / `.cpp` | Exact parsing of human-readable prices, BTC/USDT amounts, percentages, and durations into integer atoms. No floating point and no silent rounding. |
 
 `OrderBook` answers **what levels are known?** `BookTracker` answers **can consumers
@@ -139,7 +139,8 @@ decimal precision, tick/quantity steps, symbols, IDs, and timestamps. It contain
 no sockets, making its inputs easy to test with synthetic JSON.
 
 `capture.hpp/.cpp` provides the `adapters::binance::capture` entry point. Its private
-`HttpsGet` handles REST transport, `DepthSocket` handles WebSocket transport, and
+`HttpsGet` handles REST transport, `StreamSocket` handles the combined depth/trade
+WebSocket, and
 `Capture` coordinates metadata, recording, book tracking, timers, and recovery.
 There is one application event loop.
 

@@ -103,6 +103,25 @@ int main(int argc, char* argv[])
               "a later gap must immediately hide quotes");
         tracker.apply(BookReset{"stale_depth"});
         check(!tracker.view().synchronized(), "stale data must invalidate quotes");
+
+        // Trades round-trip through a v4 recording with their ID and aggressor.
+        FileCleanup trades{std::filesystem::path(argv[1]) / std::format("capture-trades-{}.csv", suffix)};
+        {
+            SessionRecorder recorder(trades.path.string());
+            recorder.append({{1, 0, 100, 0}, BookReset{"connecting"}});
+            rejects([&] { recorder.append({{2, 5, 101, 1}, Trade{100, 1}}); }); // no ID or aggressor
+            recorder.append({{2, 5, 101, 1}, Trade{100, 1, 41, Aggressor::sell}});
+            recorder.append({{3, 6, 102, 2}, Trade{101, 2, 42, Aggressor::buy}});
+            recorder.finish();
+        }
+        std::ifstream recorded(trades.path);
+        std::vector<Trade> replayed;
+        replay(recorded, [&](const MarketEvent& event) {
+            if (const auto* trade = std::get_if<Trade>(&event.data)) replayed.push_back(*trade);
+        });
+        check(replayed.size() == 2 && replayed[0].trade_id == 41 && replayed[0].aggressor == Aggressor::sell &&
+              replayed[1].price_atoms == 101 && replayed[1].aggressor == Aggressor::buy,
+              "recorded trades must replay with ID and aggressor");
         std::fputs("Capture, synchronization, and recording checks passed\n", stdout);
         return 0;
     } catch (const std::exception& error) {

@@ -14,9 +14,15 @@ struct EventTime {
     std::int64_t receive_elapsed_ns;
 };
 
+// Which side crossed the spread: a buy aggressor lifted asks, a sell aggressor hit bids.
+// Resting limit orders are filled only by the opposite aggressor. Unknown in v1-v3 files.
+enum class Aggressor { unknown, buy, sell };
+
 struct Trade {
     std::int64_t price_atoms;
     std::int64_t quantity_atoms;
+    std::int64_t trade_id = 0; // venue trade ID, consecutive per symbol; 0 = unknown
+    Aggressor aggressor = Aggressor::unknown;
 };
 
 struct Level {

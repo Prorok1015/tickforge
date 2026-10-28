@@ -33,6 +33,8 @@ using Error = boost::system::error_code;
 using Clock = std::chrono::steady_clock;
 constexpr auto rest_host = "data-api.binance.vision";
 constexpr auto stream_host = "data-stream.binance.vision";
+// One combined connection keeps depth and trades in a single receipt order.
+constexpr auto stream_target = "/stream?streams=btcusdt@depth@100ms/btcusdt@trade";
 
 void configure_tls(ssl::stream<beast::tcp_stream>& stream, const char* host)
 {
@@ -98,10 +100,10 @@ private:
     Done done_;
 };
 
-class DepthSocket : public std::enable_shared_from_this<DepthSocket> {
+class StreamSocket : public std::enable_shared_from_this<StreamSocket> {
 public:
     using Message = std::function<void(std::string)>;
-    DepthSocket(net::io_context& io, ssl::context& tls, Message message, std::function<void(Error)> done)
+    StreamSocket(net::io_context& io, ssl::context& tls, Message message, std::function<void(Error)> done)
         : resolver_(io), stream_(io, tls), message_(std::move(message)), done_(std::move(done))
     {
         configure_tls(stream_.next_layer(), stream_host);
@@ -119,7 +121,7 @@ public:
                     beast::get_lowest_layer(self->stream_).expires_never();
                     self->stream_.set_option(websocket::stream_base::timeout{
                         std::chrono::seconds(10), std::chrono::seconds(10), true});
-                    self->stream_.async_handshake(stream_host, "/ws/btcusdt@depth@100ms", [self](Error error) {
+                    self->stream_.async_handshake(stream_host, stream_target, [self](Error error) {
                         if (error) return self->finish(error);
                         self->read();
                     });
@@ -177,10 +179,10 @@ public:
             if (!ec) self->guard([&] { self->complete(); });
         });
         write_console(std::format(
-            "tickforge | Public Binance depth capture\n"
-            "REST      | https://{}\nWebSocket | wss://{}/ws/btcusdt@depth@100ms\n"
+            "tickforge | Public Binance depth and trade capture\n"
+            "REST      | https://{}\nWebSocket | wss://{}{}\n"
             "Mode      | SIMULATION ONLY | BTCUSDT | no keys or orders\n"
-            "Duration  | {} seconds including connection/synchronization\n", rest_host, stream_host, seconds_));
+            "Duration  | {} seconds including connection/synchronization\n", rest_host, stream_host, stream_target, seconds_));
         request("/api/v3/exchangeInfo?symbol=BTCUSDT", [self = shared_from_this()](std::string body, EventTime) {
             self->rules_ = parse_instrument(body);
             write_console(std::format("Metadata  | tick={} USDT | step={} BTC\n",
@@ -251,16 +253,22 @@ private:
         emit(BookReset{"connecting"});
         last_depth_ = Clock::now();
         const auto generation = generation_;
-        socket_ = std::make_shared<DepthSocket>(io_, tls_,
+        socket_ = std::make_shared<StreamSocket>(io_, tls_,
             [self = shared_from_this(), generation](std::string message) {
                 if (generation != self->generation_) return;
                 const auto received = self->receive_time();
                 self->guard([&] {
                     if (is_server_shutdown(message)) return self->reconnect("server_shutdown");
-                    std::int64_t exchange = 0;
-                    auto update = parse_depth(message, self->rules_, exchange);
+                    auto parsed = parse_stream_message(message, self->rules_);
+                    if (auto* trade = std::get_if<Trade>(&parsed.data)) {
+                        // Trades never refresh depth staleness: a quiet market is not a broken feed,
+                        // and a live trade stream does not prove that depth updates still arrive.
+                        ++self->trades_;
+                        self->emit(*trade, parsed.exchange_ns, received);
+                        return;
+                    }
                     self->last_depth_ = Clock::now();
-                    self->emit(std::move(update), exchange, received);
+                    self->emit(std::get<BookUpdate>(std::move(parsed.data)), parsed.exchange_ns, received);
                     if (self->tracker_.needs_snapshot() && !self->request_) self->snapshot();
                 });
             }, [self = shared_from_this(), generation](Error ec) {
@@ -331,7 +339,8 @@ private:
         emit(BookReset{"shutdown"});
         recorder_.finish();
         stopping_ = true;
-        write_console(std::format("\nCapture complete | {} events | {} reconnects | recording footer saved\n", ordinal_, reconnects_));
+        write_console(std::format("\nCapture complete | {} events ({} trades) | {} reconnects | recording footer saved\n",
+            ordinal_, trades_, reconnects_));
     }
     void fail(std::string message)
     {
@@ -352,9 +361,9 @@ private:
     InstrumentRules rules_{};
     BookTracker tracker_;
     std::shared_ptr<HttpsGet> request_;
-    std::shared_ptr<DepthSocket> socket_;
+    std::shared_ptr<StreamSocket> socket_;
     Clock::time_point origin_ = Clock::now(), last_depth_ = origin_, last_display_ = origin_;
-    std::int64_t ordinal_ = 0;
+    std::int64_t ordinal_ = 0, trades_ = 0;
     unsigned generation_ = 0, reconnects_ = 0, snapshot_requests_ = 0;
     bool stopping_ = false, ever_ready_ = false;
     std::string failure_;

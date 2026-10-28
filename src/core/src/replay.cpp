@@ -70,7 +70,9 @@ void replay(std::istream& input, const EventHandler& handler)
 {
     std::string line;
     if (!read_line(input, line)) throw std::runtime_error("missing session header");
-    const bool version3 =
+    const bool version4 =
+        line == "tickforge,4,BINANCE_SPOT,BTCUSDT,price_scale=100,quantity_scale=100000000";
+    const bool version3 = version4 ||
         line == "tickforge,3,BINANCE_SPOT,BTCUSDT,price_scale=100,quantity_scale=100000000";
     const bool version2 = version3 ||
         line == "tickforge,2,BINANCE_SPOT,BTCUSDT,price_scale=100,quantity_scale=100000000";
@@ -95,10 +97,17 @@ void replay(std::istream& input, const EventHandler& handler)
             }
             if (values.size() < 5) throw std::runtime_error("missing event metadata");
             event.time = {integer(values[1]), integer(values[2]), integer(values[3]), integer(values[4])};
-            if (values[0] == "trade" && values.size() == 7) {
-                const Trade trade{integer(values[5]), integer(values[6])};
+            if (values[0] == "trade" && values.size() == (version4 ? 9U : 7U)) {
+                Trade trade{integer(values[5]), integer(values[6])};
                 if (trade.price_atoms == 0 || trade.quantity_atoms == 0)
                     throw std::runtime_error("trade price and quantity must be positive");
+                if (version4) {
+                    trade.trade_id = integer(values[7]);
+                    if (trade.trade_id == 0) throw std::runtime_error("trade ID must be positive");
+                    if (values[8] == "buy") trade.aggressor = Aggressor::buy;
+                    else if (values[8] == "sell") trade.aggressor = Aggressor::sell;
+                    else throw std::runtime_error("trade aggressor must be buy or sell");
+                }
                 event.data = trade;
             } else if (version2 && (values[0] == "snapshot" ||
                        (version3 && values[0] == "snapshot_pending")) && values.size() >= 8) {

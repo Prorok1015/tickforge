@@ -12,7 +12,7 @@ SessionRecorder::SessionRecorder(const std::string& path)
     file_ = std::fopen(path.c_str(), "wx");
     if (!file_) throw std::runtime_error(std::format("cannot create new recording '{}': {}", path, std::strerror(errno)));
     try {
-        write("tickforge,3,BINANCE_SPOT,BTCUSDT,price_scale=100,quantity_scale=100000000\n");
+        write("tickforge,4,BINANCE_SPOT,BTCUSDT,price_scale=100,quantity_scale=100000000\n");
     } catch (...) {
         std::fclose(file_);
         file_ = nullptr;
@@ -38,8 +38,11 @@ void SessionRecorder::append(const MarketEvent& event)
     std::string row;
     const auto prefix = std::format(",{},{},{},{}", t.ordinal, t.exchange_ns, t.receive_unix_ns, t.receive_elapsed_ns);
     if (const auto* trade = std::get_if<Trade>(&event.data)) {
-        if (trade->price_atoms <= 0 || trade->quantity_atoms <= 0) throw std::runtime_error("invalid trade");
-        row = std::format("trade{},{},{}", prefix, trade->price_atoms, trade->quantity_atoms);
+        // v4 trades carry the venue ID (for gap detection) and the aggressor side.
+        if (trade->price_atoms <= 0 || trade->quantity_atoms <= 0 || trade->trade_id <= 0 ||
+            trade->aggressor == Aggressor::unknown) throw std::runtime_error("invalid trade");
+        row = std::format("trade{},{},{},{},{}", prefix, trade->price_atoms, trade->quantity_atoms, trade->trade_id,
+            trade->aggressor == Aggressor::buy ? "buy" : "sell");
     } else if (const auto* reset = std::get_if<BookReset>(&event.data)) {
         if (reset->reason.empty() || reset->reason.find_first_not_of("abcdefghijklmnopqrstuvwxyz_") != std::string::npos)
             throw std::runtime_error("invalid reset reason");

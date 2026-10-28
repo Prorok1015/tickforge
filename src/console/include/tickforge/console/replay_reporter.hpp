@@ -18,7 +18,8 @@ private:
     void status(BookResult result);
 
     BookTracker tracker_;
-    std::size_t events_ = 0, trades_ = 0, snapshots_ = 0, updates_ = 0, resets_ = 0, warnings_ = 0;
+    std::size_t events_ = 0, trades_ = 0, snapshots_ = 0, updates_ = 0, resets_ = 0, warnings_ = 0, trade_gaps_ = 0;
+    std::int64_t last_trade_id_ = 0;
 };
 
 } // namespace tickforge

@@ -93,23 +93,70 @@ BookSnapshot parse_snapshot(std::string_view json, const InstrumentRules& rules)
         levels(root.at("asks"), rules, true), true};
 }
 
-BookUpdate parse_depth(std::string_view json, const InstrumentRules& rules, std::int64_t& exchange_ns)
+namespace {
+std::int64_t milliseconds_to_ns(const Json& value)
 {
-    const auto root = Json::parse(json);
+    const auto milliseconds = id(value);
+    if (milliseconds > maximum / 1000000) throw std::runtime_error("exchange timestamp overflow");
+    return milliseconds * 1000000;
+}
+
+BookUpdate depth_event(const Json& root, const InstrumentRules& rules, std::int64_t& exchange_ns)
+{
     if (root.at("e") != "depthUpdate" || root.at("s") != "BTCUSDT")
         throw std::runtime_error("unexpected Binance stream event/symbol");
-    const auto milliseconds = id(root.at("E"));
-    if (milliseconds > maximum / 1000000) throw std::runtime_error("exchange timestamp overflow");
-    exchange_ns = milliseconds * 1000000;
+    exchange_ns = milliseconds_to_ns(root.at("E"));
     BookUpdate update{id(root.at("U")), id(root.at("u")), levels(root.at("b"), rules, false),
         levels(root.at("a"), rules, false)};
     if (update.first_update_id > update.last_update_id) throw std::runtime_error("reversed depth range");
     return update;
 }
 
+Trade trade_event(const Json& root, const InstrumentRules& rules, std::int64_t& exchange_ns)
+{
+    if (root.at("e") != "trade" || root.at("s") != "BTCUSDT")
+        throw std::runtime_error("unexpected Binance stream event/symbol");
+    exchange_ns = milliseconds_to_ns(root.at("T"));
+    const auto& maker = root.at("m");
+    if (!maker.is_boolean()) throw std::runtime_error("trade maker flag must be boolean");
+    const auto price = decimal_atoms(root.at("p").get<std::string>(), 2);
+    const auto quantity = decimal_atoms(root.at("q").get<std::string>(), 8);
+    if (price <= 0 || quantity <= 0 || rules.price_tick_atoms <= 0 || rules.quantity_step_atoms <= 0 ||
+        price % rules.price_tick_atoms != 0 || quantity % rules.quantity_step_atoms != 0)
+        throw std::runtime_error("trade price/quantity violates instrument tick or step");
+    const auto trade_id = id(root.at("t"));
+    if (trade_id == 0) throw std::runtime_error("trade ID must be positive");
+    // Buyer is maker: the buyer's order rested, so the seller crossed the spread.
+    return {price, quantity, trade_id, maker.get<bool>() ? Aggressor::sell : Aggressor::buy};
+}
+} // namespace
+
+BookUpdate parse_depth(std::string_view json, const InstrumentRules& rules, std::int64_t& exchange_ns)
+{
+    return depth_event(Json::parse(json), rules, exchange_ns);
+}
+
+Trade parse_trade(std::string_view json, const InstrumentRules& rules, std::int64_t& exchange_ns)
+{
+    return trade_event(Json::parse(json), rules, exchange_ns);
+}
+
+StreamMessage parse_stream_message(std::string_view json, const InstrumentRules& rules)
+{
+    const auto root = Json::parse(json);
+    const auto& stream = root.at("stream");
+    const auto& data = root.at("data");
+    StreamMessage message{BookUpdate{}, 0};
+    if (stream == "btcusdt@depth@100ms") message.data = depth_event(data, rules, message.exchange_ns);
+    else if (stream == "btcusdt@trade") message.data = trade_event(data, rules, message.exchange_ns);
+    else throw std::runtime_error("unexpected Binance combined stream");
+    return message;
+}
+
 bool is_server_shutdown(std::string_view json)
 {
     const auto root = Json::parse(json);
-    return root.value("e", std::string{}) == "serverShutdown";
+    const auto& event = root.contains("data") && root.at("data").is_object() ? root.at("data") : root;
+    return event.value("e", std::string{}) == "serverShutdown";
 }
 } // namespace tickforge::adapters::binance

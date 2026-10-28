@@ -34,8 +34,22 @@ void ReplayReporter::on_event(const MarketEvent& event)
 void ReplayReporter::describe(const Trade& trade)
 {
     ++trades_;
-    write_console(std::format("  TRADE  | price={} USDT | quantity={} BTC\n",
-        price_text(trade.price_atoms), quantity_text(trade.quantity_atoms)));
+    if (trade.trade_id == 0) {
+        write_console(std::format("  TRADE  | price={} USDT | quantity={} BTC\n",
+            price_text(trade.price_atoms), quantity_text(trade.quantity_atoms)));
+        return;
+    }
+    write_console(std::format("  TRADE  | id={} | {} aggressor | price={} USDT | quantity={} BTC\n", trade.trade_id,
+        trade.aggressor == Aggressor::buy ? "BUY" : "SELL", price_text(trade.price_atoms), quantity_text(trade.quantity_atoms)));
+    // Venue IDs are consecutive: a jump means trades were missed (for example during a
+    // reconnect). The book is unaffected, but traded volume at a price is incomplete.
+    if (last_trade_id_ != 0 && trade.trade_id - 1 != last_trade_id_) { // IDs are positive: no overflow
+        ++trade_gaps_;
+        write_console(trade.trade_id > last_trade_id_
+            ? std::format("  STATUS | TRADE GAP | ids {}..{} missing\n", last_trade_id_ + 1, trade.trade_id - 1)
+            : std::format("  STATUS | TRADE ORDER | id {} after {}\n", trade.trade_id, last_trade_id_));
+    }
+    last_trade_id_ = trade.trade_id;
 }
 
 void ReplayReporter::describe(const BookSnapshot& snapshot)
@@ -76,8 +90,9 @@ void ReplayReporter::summary() const
     write_console(std::format(
         "Replay complete | {} events: {} trades, {} snapshots, {} depth updates\n"
         "Lifecycle       | {} local resets\n"
+        "Trade feed      | {} ID gaps or reorders\n"
         "Integrity       | {} warnings | final book: {}\n",
-        events_, trades_, snapshots_, updates_, resets_, warnings_,
+        events_, trades_, snapshots_, updates_, resets_, trade_gaps_, warnings_,
         tracker_.view().synchronized() ? "synchronized (known levels only)" : "unavailable"));
 }
 } // namespace tickforge
