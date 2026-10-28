@@ -21,6 +21,9 @@ public:
     std::size_t ask_levels() const { return asks_.size(); }
     std::vector<Level> bid_depth() const; // best price first; known levels only
     std::vector<Level> ask_depth() const;
+    // Known size at one price; zero when the level is absent or the book is not synchronized.
+    std::int64_t bid_size(std::int64_t price_atoms) const;
+    std::int64_t ask_size(std::int64_t price_atoms) const;
 
 private:
     void invalidate();

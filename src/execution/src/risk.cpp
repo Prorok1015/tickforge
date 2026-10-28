@@ -57,7 +57,7 @@ void RiskGuard::observe(std::int64_t now_ns, std::optional<std::int64_t> equity_
         enter(TradingState::reduce_only, RiskTrigger::max_drawdown, equity);
 }
 
-std::optional<std::string> RiskGuard::admit(const MarketOrder& order)
+std::optional<std::string> RiskGuard::admit(const Order& order)
 {
     if (limits_.max_orders_per_minute > 0 && state_ != TradingState::halted) {
         while (!recent_requests_.empty() && recent_requests_.front() <= now_ns_ - minute_ns) recent_requests_.pop_front();

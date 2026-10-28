@@ -39,7 +39,7 @@ void validate_config(const ThresholdConfig& c)
 }
 Threshold::Threshold(ThresholdConfig config) : config_(config) { validate_config(config); }
 
-std::optional<MarketOrder> Threshold::on_market(const View& view)
+std::optional<Order> Threshold::on_market(const View& view)
 {
     if (view.time.ordinal <= last_ordinal_) throw std::runtime_error("strategy requires increasing event ordinals");
     last_ordinal_ = view.time.ordinal;
@@ -57,26 +57,26 @@ std::optional<MarketOrder> Threshold::on_market(const View& view)
         view.ask->price_atoms <= 0 || view.bid->price_atoms >= view.ask->price_atoms ||
         view.bid->quantity_atoms <= 0 || view.ask->quantity_atoms <= 0 ||
         view.balances.base_reserved != 0 || view.balances.quote_reserved != 0) return std::nullopt;
-    std::optional<MarketOrder> order;
+    std::optional<Order> order;
     auto signal = Signal::none;
     const bool cooling = cooldown_until_ && view.time.receive_elapsed_ns < *cooldown_until_;
     if (view.balances.base_total == 0 && view.buys_allowed && !cooling && view.ask->price_atoms <= config_.buy_price_atoms) {
         const auto budget = std::min(config_.buy_budget_quote_atoms, view.balances.available_quote());
-        if (budget > 0) order = MarketOrder{next_id_, Side::buy, config_.quantity_atoms, budget};
+        if (budget > 0) order = Order{next_id_, Side::buy, config_.quantity_atoms, budget};
         signal = Signal::buy;
     } else if (view.balances.base_total > 0 && view.sells_allowed && stop_triggered(view, config_.stop_loss_ppm)) {
         // Exit at market: the stop prefers leaving to waiting, so no bid-size cap and no
         // break-even check. The lot still caps the request, as for any order.
         const auto quantity = std::min(config_.quantity_atoms, view.balances.available_base());
         const auto rounded = quantity - quantity % config_.quantity_step_atoms;
-        if (rounded > 0) order = MarketOrder{next_id_, Side::sell, rounded, 0};
+        if (rounded > 0) order = Order{next_id_, Side::sell, rounded, 0};
         signal = Signal::stop_loss;
     } else if (view.balances.base_total > 0 && view.sells_allowed && view.bid->price_atoms >= config_.sell_price_atoms) {
         // Never sell more than the best bid holds: the whole sale then fills at the checked price.
         const auto quantity = std::min({config_.quantity_atoms, view.balances.available_base(), view.bid->quantity_atoms});
         const auto rounded = quantity - quantity % config_.quantity_step_atoms;
         if (rounded > 0 && covers_cost(view, rounded, config_.fee_ppm))
-            order = MarketOrder{next_id_, Side::sell, rounded, 0};
+            order = Order{next_id_, Side::sell, rounded, 0};
         signal = Signal::take_profit;
     }
     if (order) {

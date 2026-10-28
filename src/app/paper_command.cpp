@@ -46,7 +46,7 @@ void paper_session(const PaperOptions& options)
     execution::RiskGuard risk(scenario.risk, amount_add(scenario.initial_quote_atoms, scenario.initial_base_cost_atoms));
     execution::OrderManager manager(account, simulator, scenario.config, &risk);
     PaperTotals totals;
-    std::size_t next = 0;
+    std::size_t next = 0, next_cancel = 0;
     std::optional<Mark> mark;
     // Created before the run so that an existing report fails fast and is never overwritten.
     std::optional<PaperExport> exporter;
@@ -62,23 +62,30 @@ void paper_session(const PaperOptions& options)
             : std::format("sell at market when position value is {} ppm below cost", scenario.strategy->stop_loss_ppm),
         scenario.strategy->cooldown_ns == 0 ? std::string("off")
             : std::format("no buys for {} ns after a stop-loss closes the position", scenario.strategy->cooldown_ns)));
-    const auto record = [&](const execution::OrderReport& report, const EventTime& submitted, std::string_view signal) {
-        paper_order(report);
+    const auto record = [&](const execution::OrderReport& report, const EventTime& submitted, std::string_view signal,
+                            bool first) {
+        paper_order(report, first);
         if (exporter) exporter->order(submitted, signal, report);
+        totals.fills += report.result.fills.size();
+        for (const auto& fill : report.result.fills) {
+            totals.fees = amount_add(totals.fees, fill.fee_quote_atoms);
+            if (fill.liquidity == Liquidity::maker) ++totals.maker_fills;
+        }
+        if (!report.final) return;
         if (report.result.status == OrderStatus::rejected) ++totals.rejected;
         if (report.interruption == execution::Interruption::no_trusted_book) ++totals.cancelled_no_book;
         if (report.interruption == execution::Interruption::session_ended) ++totals.cancelled_at_end;
-        totals.fills += report.result.fills.size();
-        for (const auto& fill : report.result.fills) totals.fees = amount_add(totals.fees, fill.fee_quote_atoms);
     };
-    // Submission time and signal of accepted orders until their reports arrive.
-    std::map<std::int64_t, std::pair<EventTime, std::string_view>> in_flight;
+    // Submission time and signal of accepted orders until their final report arrives.
+    struct Submitted { EventTime time; std::string_view signal; bool reported = false; };
+    std::map<std::int64_t, Submitted> in_flight;
     const auto collect = [&] {
         for (const auto& report : manager.collect()) {
             const auto found = in_flight.find(report.order.id);
             if (found == in_flight.end()) throw std::runtime_error("report for an order this run did not submit");
-            record(report, found->second.first, found->second.second);
-            in_flight.erase(found);
+            record(report, found->second.time, found->second.signal, !found->second.reported);
+            found->second.reported = true;
+            if (report.final) in_flight.erase(found);
         }
     };
     // Prints a risk state change once and remembers when it happened for the report.
@@ -92,15 +99,19 @@ void paper_session(const PaperOptions& options)
             risk.trigger_equity() ? money_text(*risk.trigger_equity()) : std::string("unknown"),
             money_text(amount_add(scenario.initial_quote_atoms, scenario.initial_base_cost_atoms)),
             money_text(risk.peak_equity())));
+        // Resting orders the new state forbids are withdrawn: buys in reduce-only, all when halted.
+        const auto cancelled = manager.cancel_open(risk.state() == execution::TradingState::halted
+            ? std::nullopt : std::optional<Side>(Side::buy));
+        if (cancelled != 0) write_console(std::format("Risk      | cancel requested for {} resting order(s)\n", cancelled));
     };
-    const auto submit = [&](const MarketEvent& event, const MarketOrder& order, std::string_view signal) {
+    const auto submit = [&](const MarketEvent& event, const Order& order, std::string_view signal) {
         ++totals.requests;
         const auto rejected = manager.submit(order);
         note_risk(event.time);
         if (rejected) {
-            record(*rejected, event.time, signal);
+            record(*rejected, event.time, signal, true);
         } else {
-            in_flight.emplace(order.id, std::pair{event.time, signal});
+            in_flight.emplace(order.id, Submitted{event.time, signal});
             if (scenario.config.order_latency_ns != 0 || scenario.config.report_latency_ns != 0)
                 write_console(std::format("Sent      | order #{} | elapsed={} ns | funds reserved; result pending\n",
                     order.id, event.time.receive_elapsed_ns));
@@ -142,8 +153,16 @@ void paper_session(const PaperOptions& options)
         while (next < scenario.orders.size() && scenario.orders[next].after_ordinal == event.time.ordinal) {
             submit(event, scenario.orders[next++].order, "script");
         }
+        // Scripted cancels follow the orders of the same event.
+        while (next_cancel < scenario.cancels.size() && scenario.cancels[next_cancel].after_ordinal == event.time.ordinal) {
+            const auto id = scenario.cancels[next_cancel++].order_id;
+            write_console(manager.cancel(id) ? std::format("Cancel    | order #{} | requested\n", id)
+                                             : std::format("Cancel    | order #{} | nothing open to cancel\n", id));
+            collect();
+        }
     });
-    if (!automatic && next != scenario.orders.size()) throw std::runtime_error("scenario references an event beyond the recorded session");
+    if (!automatic && (next != scenario.orders.size() || next_cancel != scenario.cancels.size()))
+        throw std::runtime_error("scenario references an event beyond the recorded session");
     // Orders still in flight cannot execute without market data; executed ones still report.
     simulator.finish();
     collect();

@@ -30,7 +30,7 @@ public:
     const Balances& balances() const { return balances_; }
     const Position& position() const { return position_; }
     std::int64_t pending_buy_quantity() const;
-    void reserve(const MarketOrder& order);
+    void reserve(const Order& order);
     bool apply_fill(const Fill& fill); // false for an identical already-applied fill
     bool release(std::int64_t order_id); // idempotent terminal release
 private:

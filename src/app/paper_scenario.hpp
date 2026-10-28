@@ -8,7 +8,8 @@
 #include <vector>
 
 namespace tickforge::app {
-struct ScriptOrder { std::int64_t after_ordinal; MarketOrder order; };
+struct ScriptOrder { std::int64_t after_ordinal; Order order; };
+struct ScriptCancel { std::int64_t after_ordinal; std::int64_t order_id; };
 // One paper experiment, read from a TOML config (see docs/paper-trading.md) and
 // converted to integer atoms. Either scripted orders or a strategy, never both.
 struct PaperScenario {
@@ -18,6 +19,7 @@ struct PaperScenario {
     execution::PaperConfig config;
     execution::RiskLimits risk;         // [risk]; all limits off when absent
     std::vector<ScriptOrder> orders;
+    std::vector<ScriptCancel> cancels;  // sent after the orders of the same event
     std::optional<strategy::ThresholdConfig> strategy;
     std::vector<std::string> overrides; // "key=value" as given, applied before validation
 };

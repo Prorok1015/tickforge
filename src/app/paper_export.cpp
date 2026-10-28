@@ -30,6 +30,7 @@ std::string_view status_name(OrderStatus status)
     case OrderStatus::filled: return "filled";
     case OrderStatus::partially_filled: return "partially_filled";
     case OrderStatus::cancelled: return "cancelled";
+    case OrderStatus::open: return "open";
     }
     return "unknown";
 }
@@ -67,34 +68,40 @@ PaperExport::PaperExport(std::string_view prefix)
     orders_ = create(orders_path_);
     fills_ = create(fills_path_);
     // Times are recorded session offsets: submission, execution at the venue, report to us.
-    write(orders_.get(), "submitted_event_ordinal,submitted_ns,order_id,signal,side,quantity_atoms,max_spend_quote_atoms,"
-        "accepted,status,filled_quantity_atoms,remaining_quantity_atoms,fill_count,fee_quote_atoms,"
-        "quote_total_atoms,base_total_atoms,cost_basis_quote_atoms,realized_pnl_quote_atoms,"
+    write(orders_.get(), "submitted_event_ordinal,submitted_ns,order_id,signal,side,type,limit_price_atoms,post_only,"
+        "quantity_atoms,max_spend_quote_atoms,accepted,status,filled_quantity_atoms,remaining_quantity_atoms,fill_count,"
+        "fee_quote_atoms,quote_total_atoms,base_total_atoms,cost_basis_quote_atoms,realized_pnl_quote_atoms,"
         "executed_ns,reported_ns,interruption,reason\n");
     write(fills_.get(), "submitted_event_ordinal,submitted_ns,order_id,fill_id,side,price_atoms,quantity_atoms,"
-        "quote_atoms,fee_quote_atoms,executed_ns\n");
+        "quote_atoms,fee_quote_atoms,executed_ns,liquidity\n");
 }
 
 void PaperExport::order(const EventTime& submitted, std::string_view signal, const execution::OrderReport& report)
 {
     const auto& result = report.result;
-    std::int64_t fees = 0;
+    auto& fill_count = fill_counts_[report.order.id];
     for (const auto& fill : result.fills) {
-        fees = amount_add(fees, fill.fee_quote_atoms);
-        write(fills_.get(), std::format("{},{},{},{},{},{},{},{},{},{}\n", submitted.ordinal, submitted.receive_elapsed_ns,
+        ++fill_count;
+        write(fills_.get(), std::format("{},{},{},{},{},{},{},{},{},{},{}\n", submitted.ordinal, submitted.receive_elapsed_ns,
             fill.order_id, fill.id, side_name(fill.side), fill.price_atoms, fill.quantity_atoms, fill.quote_atoms,
-            fill.fee_quote_atoms, report.executed_ns));
+            fill.fee_quote_atoms, report.executed_ns, fill.liquidity == Liquidity::maker ? "maker" : "taker"));
     }
+    // One order row per order, written when it ends, with cumulative totals.
+    if (!report.final) return;
+    const auto& order = report.order;
     const auto& balances = report.final_balances;
     // Execution and report times are empty for requests rejected before execution.
     const auto time = [&](std::int64_t value) { return report.accepted ? std::format("{}", value) : std::string(); };
-    write(orders_.get(), std::format("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
-        submitted.ordinal, submitted.receive_elapsed_ns, report.order.id, signal, side_name(report.order.side),
-        report.order.quantity_atoms, report.order.max_spend_quote_atoms, report.accepted ? 1 : 0,
-        status_name(result.status), report.order.quantity_atoms - result.remaining_quantity_atoms,
-        result.remaining_quantity_atoms, result.fills.size(), fees, balances.quote_total, balances.base_total,
+    write(orders_.get(), std::format("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+        submitted.ordinal, submitted.receive_elapsed_ns, order.id, signal, side_name(order.side),
+        order.type == OrderType::limit ? "limit" : "market",
+        order.type == OrderType::limit ? std::format("{}", order.limit_price_atoms) : std::string(),
+        order.post_only ? 1 : 0, order.quantity_atoms, order.max_spend_quote_atoms, report.accepted ? 1 : 0,
+        status_name(result.status), report.filled_quantity_atoms, result.remaining_quantity_atoms, fill_count,
+        report.fee_quote_atoms, balances.quote_total, balances.base_total,
         report.final_position.base_cost_quote, report.final_position.realized_pnl_quote,
         time(report.executed_ns), time(report.reported_ns), interruption_name(report.interruption), csv(result.reason)));
+    fill_counts_.erase(order.id);
 }
 
 void PaperExport::complete(std::string_view command, std::string_view session, std::string_view scenario_path,
@@ -108,7 +115,7 @@ void PaperExport::complete(std::string_view command, std::string_view session, s
     std::vector<std::pair<std::string, std::string>> rows;
     const auto add = [&](std::string key, auto value) { rows.emplace_back(std::move(key), std::format("{}", value)); };
     add("format", "tickforge-paper-summary");
-    add("version", 4);
+    add("version", 5);
     add("command", command);
     add("session", csv(session));
     add("config", csv(scenario_path));
@@ -122,6 +129,7 @@ void PaperExport::complete(std::string_view command, std::string_view session, s
     add("initial_base_atoms", scenario.initial_base_atoms);
     add("initial_base_cost_quote_atoms", scenario.initial_base_cost_atoms);
     add("fee_ppm", scenario.config.fee_ppm);
+    add("maker_fee_ppm", scenario.config.maker_fee_ppm);
     add("quantity_step_atoms", scenario.config.quantity_step_atoms);
     add("max_order_quantity_atoms", scenario.config.max_order_quantity_atoms);
     add("max_position_quantity_atoms", scenario.config.max_position_quantity_atoms);
@@ -142,12 +150,14 @@ void PaperExport::complete(std::string_view command, std::string_view session, s
     } else {
         add("strategy", "script");
         add("script_orders", scenario.orders.size());
+        add("script_cancels", scenario.cancels.size());
     }
     add("events", totals.events);
     add("requests", totals.requests);
     add("rejected", totals.rejected);
     add("fills", totals.fills);
     add("fees_quote_atoms", totals.fees);
+    add("maker_fills", totals.maker_fills);
     add("cancelled_no_trusted_book", totals.cancelled_no_book);
     add("cancelled_session_ended", totals.cancelled_at_end);
     const auto& balances = account.balances();

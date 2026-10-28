@@ -49,7 +49,7 @@ foreach(case IN ITEMS
         "orders[0].quantity: '0.000000001' has more than 8|[[orders]]\nafter_event = 1\nid = 1\nside = \"sell\"\nquantity = \"0.000000001\"\n"
         "orders[0].quantity: '92233720368.54775808' is too large|[[orders]]\nafter_event = 1\nid = 1\nside = \"sell\"\nquantity = \"92233720368.54775808\"\n"
         "orders[0].prise: unknown key|[[orders]]\nafter_event = 1\nid = 1\nside = \"sell\"\nquantity = \"0.00001\"\nprise = \"1\"\n"
-        "orders[0].max_spend: applies to buys only|[[orders]]\nafter_event = 1\nid = 1\nside = \"sell\"\nquantity = \"0.00001\"\nmax_spend = \"1\"\n"
+        "orders[0].max_spend: applies to market buys only|[[orders]]\nafter_event = 1\nid = 1\nside = \"sell\"\nquantity = \"0.00001\"\nmax_spend = \"1\"\n"
         "orders[0].max_spend: is required|[[orders]]\nafter_event = 1\nid = 1\nside = \"buy\"\nquantity = \"0.00001\"\n"
         "use either|[strategy]\ntype = \"threshold\"\n${buy}"
         "line 10|usdt = \n")
@@ -136,14 +136,14 @@ execute_process(COMMAND "${PROGRAM}" paper "${SESSION}" --config "${comma_config
 file(READ "${reports}/run-orders.csv" orders)
 file(READ "${reports}/run-summary.csv" summary)
 foreach(expected IN ITEMS
-        "4,300,6,script,buy,100000,10000000000,0,rejected,0,100000,0,0,60933448950,600000,39039975974,-26575076,,,none,book unavailable or stale\n"
-        "8,700,8,script,sell,100000,0,1,filled,100000,0,1,6500000,60920148650,600000,39040093949,-39757401,700,700,none,filled\n")
+        "4,300,6,script,buy,market,,0,100000,10000000000,0,rejected,0,100000,0,0,60933448950,600000,39039975974,-26575076,,,none,book unavailable or stale\n"
+        "8,700,8,script,sell,market,,0,100000,0,1,filled,100000,0,1,6500000,60920148650,600000,39040093949,-39757401,700,700,none,filled\n")
     string(FIND "${orders}" "${expected}" position)
     if(NOT "${result}" STREQUAL "0" OR position EQUAL -1)
         message(FATAL_ERROR "Order journal missing: ${expected}\n${orders}\n${error}")
     endif()
 endforeach()
-foreach(expected IN ITEMS "version,4\n" "command,paper\n" "config,\"${comma_config}\"\n"
+foreach(expected IN ITEMS "version,5\n" "command,paper\n" "config,\"${comma_config}\"\n"
         "overrides,execution.stale_after=5s\n" "fee_ppm,1000\n" "stale_after_ns,5000000000\n"
         "strategy,script\n" "script_orders,8\n"
         "requests,8\nrejected,1\nfills,8\nfees_quote_atoms,78001350\n" "realized_pnl_quote_atoms,-39757401\n"
@@ -188,5 +188,54 @@ endforeach()
 if(NOT summary MATCHES "max_orders_per_minute,2\n" OR NOT summary MATCHES "risk_state,halted\nrisk_trigger,order_rate\nrisk_event_ordinal,1\n")
     message(FATAL_ERROR "Halt must be recorded in the summary: ${summary}")
 endif()
+# Scripted limit orders on a v4 session: order 1 rests behind 0.004 BTC at 99.00, trades
+# consume the queue and reach it (0.0003 BTC), then a sale at 98.00 trades through it.
+# Order 2 rests at 97.00 and is cancelled after event 2, before any trade reaches it.
+set(limits_session "${reports}/limits-market.csv")
+set(limits_config "${reports}/limits.toml")
+file(WRITE "${limits_session}" "tickforge,4,BINANCE_SPOT,BTCUSDT,price_scale=100,quantity_scale=100000000\nsnapshot,1,0,0,0,1,1,1,9900,400000,10100,500000\ntrade,2,0,0,1,9900,350000,11,sell\ntrade,3,0,0,2,9900,80000,12,sell\ntrade,4,0,0,3,9800,1000,13,sell\nend,4\n")
+file(WRITE "${limits_config}" "version = 1\n[account]\nusdt = \"1000\"\n[execution]\nfee = \"0.1%\"\nmaker_fee = \"0.02%\"\nquantity_step = \"0.00001\"\nmax_order = \"0.01\"\nmax_position = \"0.01\"\nstale_after = \"5s\"\n[[orders]]\nafter_event = 1\nid = 1\nside = \"buy\"\ntype = \"limit\"\nprice = \"99.00\"\nquantity = \"0.001\"\n[[orders]]\nafter_event = 1\nid = 2\nside = \"buy\"\ntype = \"limit\"\nprice = \"97.00\"\nquantity = \"0.001\"\n[[cancels]]\nafter_event = 2\nid = 2\n")
+execute_process(COMMAND "${PROGRAM}" paper "${limits_session}" --config "${limits_config}" --report "${reports}/limits"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+file(READ "${reports}/limits-summary.csv" summary)
+file(READ "${reports}/limits-orders.csv" orders)
+file(READ "${reports}/limits-fills.csv" fills)
+foreach(expected IN ITEMS "Fee       | taker 1000 ppm | maker 200 ppm"
+        "Order #1 | BUY 0.00100000 BTC | LIMIT 99.00 USDT" "OPEN (resting in the book)"
+        "price=99.00 USDT | quantity=0.00030000 BTC | notional=0.02970000 USDT | fee=0.00000594 USDT | maker"
+        "price=99.00 USDT | quantity=0.00070000 BTC" "Cancel    | order #2 | requested")
+    string(FIND "${output}" "${expected}" position)
+    if(NOT "${result}" STREQUAL "0" OR position EQUAL -1)
+        message(FATAL_ERROR "Limit order journal missing: ${expected}\n${output}\n${error}")
+    endif()
+endforeach()
+foreach(expected IN ITEMS ",1,script,buy,limit,9900,0,100000,"
+        ",filled,100000,0,2,1980," ",2,script,buy,limit,9700,0,100000," ",cancelled,0,100000,0,0,")
+    string(FIND "${orders}" "${expected}" position)
+    if(position EQUAL -1)
+        message(FATAL_ERROR "Limit order rows missing: ${expected}\n${orders}")
+    endif()
+endforeach()
+if(NOT summary MATCHES "maker_fee_ppm,200\n" OR NOT summary MATCHES "fees_quote_atoms,1980\nmaker_fills,2\n"
+        OR NOT summary MATCHES "script_cancels,1\n" OR NOT fills MATCHES ",maker\n")
+    message(FATAL_ERROR "Limit order summary mismatch:\n${summary}\n${fills}")
+endif()
+foreach(case IN ITEMS "orders[0].price: is required|[[orders]]\nafter_event = 1\nid = 1\nside = \"buy\"\ntype = \"limit\"\nquantity = \"0.001\"\n"
+        "orders[0].max_spend: applies to market buys only|[[orders]]\nafter_event = 1\nid = 1\nside = \"buy\"\ntype = \"limit\"\nprice = \"1\"\nquantity = \"0.001\"\nmax_spend = \"1\"\n"
+        "orders[0].post_only: applies to limit orders only|[[orders]]\nafter_event = 1\nid = 1\nside = \"sell\"\nquantity = \"0.001\"\npost_only = true\n"
+        "orders[0].post_only: must be true or false|[[orders]]\nafter_event = 1\nid = 1\nside = \"sell\"\ntype = \"limit\"\nprice = \"1\"\nquantity = \"0.001\"\npost_only = \"yes\"\n"
+        "cancels[0].id: must name an order|[[cancels]]\nafter_event = 1\nid = 9\n")
+    string(FIND "${case}" "|" bar)
+    string(SUBSTRING "${case}" 0 ${bar} expected)
+    math(EXPR start "${bar} + 1")
+    string(SUBSTRING "${case}" ${start} -1 rows)
+    file(WRITE "${scratch}" "${base}${rows}")
+    execute_process(COMMAND "${PROGRAM}" paper "${SESSION}" --config "${scratch}"
+        RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    string(FIND "${error}" "${expected}" position)
+    if(NOT "${result}" STREQUAL "1" OR position EQUAL -1)
+        message(FATAL_ERROR "Invalid limit config must fail naming '${expected}':\n${rows}\n${error}")
+    endif()
+endforeach()
 file(REMOVE_RECURSE "${reports}")
 file(REMOVE "${scratch}" "${incomplete}")

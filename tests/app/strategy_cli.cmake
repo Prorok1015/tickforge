@@ -109,8 +109,8 @@ foreach(run IN ITEMS first second)
 endforeach()
 file(READ "${reports}/first-orders.csv" orders)
 file(READ "${reports}/first-summary.csv" summary)
-foreach(expected IN ITEMS "1,0,1,buy,buy,200000,1000000000,1,partially_filled,100000,100000,1,10000,"
-        "3,200,2,take_profit,sell,100000,0,1,filled,100000,0,1,10200,10000179800,0,0,179800,200,200,none,filled\n")
+foreach(expected IN ITEMS "1,0,1,buy,buy,market,,0,200000,1000000000,1,partially_filled,100000,100000,1,10000,"
+        "3,200,2,take_profit,sell,market,,0,100000,0,1,filled,100000,0,1,10200,10000179800,0,0,179800,200,200,none,filled\n")
     string(FIND "${orders}" "${expected}" position)
     if(position EQUAL -1)
         message(FATAL_ERROR "Strategy order journal missing: ${expected}\n${orders}")

@@ -33,7 +33,7 @@ enum class Signal { none, buy, take_profit, stop_loss };
 class Threshold final : public Strategy {
 public:
     explicit Threshold(ThresholdConfig config);
-    std::optional<MarketOrder> on_market(const View& view) override;
+    std::optional<Order> on_market(const View& view) override;
     Signal last_signal() const { return last_signal_; } // reason for the latest proposal
     // Set only by the call that started a cooldown: end of the buy pause.
     std::optional<std::int64_t> started_cooldown_until() const { return started_cooldown_; }

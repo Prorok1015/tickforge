@@ -109,6 +109,18 @@ std::optional<std::int64_t> OrderBook::spread_atoms() const
     return ask->price_atoms - bid->price_atoms;
 }
 
+std::int64_t OrderBook::bid_size(std::int64_t price_atoms) const
+{
+    const auto found = bids_.find(price_atoms);
+    return synchronized_ && found != bids_.end() ? found->second : 0;
+}
+
+std::int64_t OrderBook::ask_size(std::int64_t price_atoms) const
+{
+    const auto found = asks_.find(price_atoms);
+    return synchronized_ && found != asks_.end() ? found->second : 0;
+}
+
 std::vector<Level> OrderBook::bid_depth() const
 {
     std::vector<Level> result;

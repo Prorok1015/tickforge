@@ -15,7 +15,8 @@ std::string money_text(std::int64_t atoms);
 std::string overrides_text(const std::vector<std::string>& overrides);
 void paper_header(std::string_view session, std::string_view scenario, const PaperScenario& config);
 void paper_market(const MarketEvent& event, bool available);
-void paper_order(const execution::OrderReport& report);
+// first: the order's first report (shows the request and its reservation).
+void paper_order(const execution::OrderReport& report, bool first = true);
 void paper_summary(const accounting::Account& account, std::size_t orders, std::size_t rejected,
                    std::size_t fills, std::int64_t fees, std::optional<Mark> mark);
 }

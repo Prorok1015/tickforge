@@ -61,6 +61,20 @@ public:
         if (!node || !node->is_string()) fail(path(key), "is required and must be a string");
         return node->as_string()->get();
     }
+    std::string text_or(std::string_view key, std::string_view fallback) const
+    {
+        return has(key) ? text(key) : std::string(fallback);
+    }
+    // TOML true/false; overrides arrive as the strings "true"/"false".
+    bool flag_or(std::string_view key, bool fallback) const
+    {
+        const auto* node = table_.get(key);
+        if (!node) return fallback;
+        if (const auto* value = node->as_boolean()) return value->get();
+        if (const auto* text = node->as_string(); text && (text->get() == "true" || text->get() == "false"))
+            return text->get() == "true";
+        fail(path(key), "must be true or false");
+    }
 private:
     template<class Parse> std::int64_t convert(std::string_view key, const toml::node& node, Parse parse) const
     {
@@ -127,7 +141,7 @@ PaperScenario load_paper_scenario(std::string_view path, const std::vector<std::
 
     PaperScenario result{};
     result.overrides = overrides;
-    const Section top(root, "", {"version", "account", "execution", "risk", "strategy", "orders"});
+    const Section top(root, "", {"version", "account", "execution", "risk", "strategy", "orders", "cancels"});
     if (top.get("version", whole) != 1) fail("version", "only version 1 is supported");
 
     const auto* account_table = subtable(root, "account");
@@ -144,8 +158,11 @@ PaperScenario load_paper_scenario(std::string_view path, const std::vector<std::
     const auto* execution_table = subtable(root, "execution");
     if (!execution_table) fail("execution", "section is required");
     const Section execution(*execution_table, "execution.", {"fee", "quantity_step", "max_order", "max_position",
-        "stale_after", "order_latency", "report_latency"});
+        "stale_after", "order_latency", "report_latency", "maker_fee"});
     result.config.fee_ppm = execution.get("fee", parse_percent_ppm);
+    // Without an explicit maker fee, resting fills pay the taker rate: no hidden discount.
+    result.config.maker_fee_ppm = execution.has("maker_fee") ? execution.get("maker_fee", parse_percent_ppm)
+                                                              : result.config.fee_ppm;
     result.config.quantity_step_atoms = execution.get("quantity_step", parse_quantity);
     result.config.max_order_quantity_atoms = execution.get("max_order", parse_quantity);
     result.config.max_position_quantity_atoms = execution.get("max_position", parse_quantity);
@@ -167,7 +184,8 @@ PaperScenario load_paper_scenario(std::string_view path, const std::vector<std::
 
     const auto* strategy_table = subtable(root, "strategy");
     const auto* orders = root.get("orders");
-    if (strategy_table && orders) fail("strategy", "use either [strategy] or [[orders]], not both");
+    const auto* cancels = root.get("cancels");
+    if (strategy_table && (orders || cancels)) fail("strategy", "use either [strategy] or [[orders]], not both");
     if (strategy_table) {
         const Section strategy(*strategy_table, "strategy.", {"type", "buy_below", "sell_above", "quantity",
             "buy_budget", "stop_loss", "cooldown"});
@@ -189,20 +207,49 @@ PaperScenario load_paper_scenario(std::string_view path, const std::vector<std::
         std::size_t index = 0;
         for (const auto& node : *orders->as_array()) {
             const Section order(*node.as_table(), std::format("orders[{}].", index++),
-                {"after_event", "id", "side", "quantity", "max_spend"});
+                {"after_event", "id", "side", "quantity", "max_spend", "type", "price", "post_only"});
             const auto side = order.text("side");
             if (side != "buy" && side != "sell") fail(order.path("side"), "must be \"buy\" or \"sell\"");
+            const auto type = order.text_or("type", "market");
+            if (type != "market" && type != "limit") fail(order.path("type"), "must be \"market\" or \"limit\"");
             ScriptOrder request{order.get("after_event", whole), {order.get("id", whole),
                 side == "buy" ? Side::buy : Side::sell, order.get("quantity", parse_quantity), 0}};
-            // A buy needs a budget including fees; a sell spends BTC, not USDT.
-            if (side == "buy") request.order.max_spend_quote_atoms = order.get("max_spend", parse_quote);
-            else if (order.has("max_spend")) fail(order.path("max_spend"), "applies to buys only");
+            if (type == "limit") {
+                // A limit order's budget follows from its price, so it takes no max_spend.
+                request.order.type = OrderType::limit;
+                request.order.limit_price_atoms = order.get("price", parse_price);
+                request.order.post_only = order.flag_or("post_only", false);
+                if (request.order.limit_price_atoms <= 0) fail(order.path("price"), "must be positive");
+                if (order.has("max_spend")) fail(order.path("max_spend"), "applies to market buys only");
+            } else {
+                if (order.has("price") || order.has("post_only"))
+                    fail(order.path(order.has("price") ? "price" : "post_only"), "applies to limit orders only");
+                // A market buy needs a budget including fees; a sell spends BTC, not USDT.
+                if (side == "buy") request.order.max_spend_quote_atoms = order.get("max_spend", parse_quote);
+                else if (order.has("max_spend")) fail(order.path("max_spend"), "applies to market buys only");
+            }
             if (request.after_ordinal < 1 || request.after_ordinal < previous)
                 fail(order.path("after_event"), "must be positive and nondecreasing");
             if (request.order.id < 1 || !ids.insert(request.order.id).second)
                 fail(order.path("id"), "must be positive and unique");
             previous = request.after_ordinal;
             result.orders.push_back(request);
+        }
+    }
+    if (cancels) {
+        if (!cancels->is_array_of_tables()) fail("cancels", "must be [[cancels]] tables");
+        std::int64_t previous = 0;
+        std::size_t index = 0;
+        for (const auto& node : *cancels->as_array()) {
+            const Section cancel(*node.as_table(), std::format("cancels[{}].", index++), {"after_event", "id"});
+            ScriptCancel request{cancel.get("after_event", whole), cancel.get("id", whole)};
+            if (request.after_ordinal < 1 || request.after_ordinal < previous)
+                fail(cancel.path("after_event"), "must be positive and nondecreasing");
+            if (std::none_of(result.orders.begin(), result.orders.end(),
+                    [&](const ScriptOrder& order) { return order.order.id == request.order_id; }))
+                fail(cancel.path("id"), "must name an order of this config");
+            previous = request.after_ordinal;
+            result.cancels.push_back(request);
         }
     }
     return result;

@@ -24,7 +24,7 @@ std::int64_t Account::pending_buy_quantity() const
     return quantity;
 }
 
-void Account::reserve(const MarketOrder& order)
+void Account::reserve(const Order& order)
 {
     if (order.id <= 0 || order.quantity_atoms <= 0 ||
         (order.side != Side::buy && order.side != Side::sell) ||

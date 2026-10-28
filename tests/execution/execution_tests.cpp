@@ -22,7 +22,7 @@ template<class Data> MarketEvent event(std::int64_t ordinal, Data data, std::int
 PaperConfig config() { return {1000, 1, 1000000000, 1000000000, 100}; }
 
 // Zero latency: an accepted order is reported by the very next collect().
-OrderReport run(OrderManager& manager, const MarketOrder& order)
+OrderReport run(OrderManager& manager, const Order& order)
 {
     if (auto rejected = manager.submit(order)) return *rejected;
     auto reports = manager.collect();
@@ -275,36 +275,150 @@ void risk_limits()
     check(run(manager, {2, Side::sell, 100000000, 0}).result.status == OrderStatus::filled, "closing is still possible");
 }
 
+Order limit(std::int64_t id, Side side, std::int64_t quantity, std::int64_t price, bool post_only = false)
+{
+    return {id, side, quantity, 0, OrderType::limit, price, post_only};
+}
+
+void limit_queue_and_fills()
+{
+    auto settings = config();
+    settings.maker_fee_ppm = 500;
+    Simulator simulator(settings);
+    accounting::Account account(1000000, 0, 0);
+    OrderManager manager(account, simulator, settings);
+    simulator.on_market_event(event(1, BookSnapshot{1, {{9900, 400}, {9800, 1000}}, {{10100, 500}, {10200, 1000}}}));
+    check(!manager.submit(limit(1, Side::buy, 100, 9900)), "a non-crossing limit buy is accepted");
+    auto reports = manager.collect();
+    check(reports.size() == 1 && !reports[0].final && reports[0].result.status == OrderStatus::open &&
+          reports[0].result.fills.empty() && simulator.queue_ahead(1) == 400,
+          "the order rests behind the 400 already visible at its price");
+    // Reservation: 9900 notional + ceil(9.9) = 10 fee at the higher fee + 2 atoms per lot of slack.
+    check(account.balances().quote_reserved == 9900 + 10 + 200 && reports[0].order.max_spend_quote_atoms == 10110,
+          "a limit buy reserves its worst-case cost");
+    simulator.on_market_event(event(2, Trade{9900, 100, 11, Aggressor::buy}));
+    check(manager.collect().empty() && simulator.queue_ahead(1) == 400, "a buy aggressor never reaches a resting bid");
+    simulator.on_market_event(event(3, Trade{9900, 350, 12, Aggressor::sell}));
+    check(manager.collect().empty() && simulator.queue_ahead(1) == 50, "sells at our price consume the queue first");
+    simulator.on_market_event(event(4, Trade{9900, 80, 13, Aggressor::sell}));
+    reports = manager.collect();
+    check(reports.size() == 1 && !reports[0].final && reports[0].result.fills.size() == 1 &&
+          reports[0].result.fills[0].quantity_atoms == 30 && reports[0].result.fills[0].price_atoms == 9900 &&
+          reports[0].result.fills[0].liquidity == Liquidity::maker && reports[0].result.fills[0].fee_quote_atoms == 2 &&
+          account.balances().base_total == 30 && account.balances().quote_reserved > 0,
+          "the part of a trade beyond the queue fills us at our price with the maker fee");
+    simulator.on_market_event(event(5, BookUpdate{2, 2, {{9900, 900}}, {}}));
+    check(simulator.queue_ahead(1) == 0, "new orders at our price join behind us");
+    simulator.on_market_event(event(6, Trade{9800, 1, 14, Aggressor::sell}));
+    reports = manager.collect();
+    check(reports.size() == 1 && reports[0].final && reports[0].result.status == OrderStatus::filled &&
+          reports[0].result.fills[0].quantity_atoms == 70 && reports[0].filled_quantity_atoms == 100 &&
+          reports[0].fee_quote_atoms == 2 + 4, "a trade below our bid means the market traded through us");
+    check(account.balances().base_total == 100 && account.balances().quote_reserved == 0 &&
+          account.balances().quote_total == 1000000 - 2970 - 2 - 6930 - 4, "maker fills and fees reconcile exactly");
+}
+
+void limit_crossing_post_only_and_cancel()
+{
+    auto settings = config();
+    settings.maker_fee_ppm = 500;
+    Simulator simulator(settings);
+    accounting::Account account(1000000, 0, 0);
+    OrderManager manager(account, simulator, settings);
+    simulator.on_market_event(event(1, BookSnapshot{1, {{9900, 400}}, {{10100, 500}, {10200, 1000}}}));
+    const auto refused = run(manager, limit(1, Side::buy, 100, 10100, true));
+    check(refused.accepted && refused.result.status == OrderStatus::rejected &&
+          refused.result.reason == "post-only limit order would cross the spread" && account.balances().quote_reserved == 0,
+          "post-only refuses to cross and releases its reservation");
+    check(!manager.submit(limit(2, Side::buy, 600, 10100)), "a crossing limit buy is accepted");
+    auto reports = manager.collect();
+    check(reports.size() == 1 && reports[0].result.status == OrderStatus::open && reports[0].result.fills.size() == 1 &&
+          reports[0].result.fills[0].liquidity == Liquidity::taker && reports[0].result.fills[0].quantity_atoms == 500 &&
+          simulator.queue_ahead(2) == 0, "the crossing part takes at most the limit price; the rest rests first in line");
+    // The asks move below our resting bid: those sellers would have hit us at our price.
+    simulator.on_market_event(event(2, BookUpdate{2, 2, {}, {{10100, 0}, {10050, 30}}}));
+    reports = manager.collect();
+    check(reports.size() == 1 && reports[0].result.fills.size() == 1 && reports[0].result.fills[0].price_atoms == 10100 &&
+          reports[0].result.fills[0].quantity_atoms == 30 && reports[0].result.fills[0].liquidity == Liquidity::maker &&
+          simulator.executable_level(Side::buy)->price_atoms == 10200,
+          "a book crossing our price fills us from the crossing size and consumes it");
+    check(manager.cancel(2) && !manager.cancel(2), "a cancel is requested once");
+    reports = manager.collect();
+    check(reports.size() == 1 && reports[0].final && reports[0].result.status == OrderStatus::partially_filled &&
+          reports[0].filled_quantity_atoms == 530 && reports[0].result.remaining_quantity_atoms == 70 &&
+          account.balances().quote_reserved == 0 && account.balances().base_total == 530,
+          "cancelling a partly filled order releases the rest of its reservation");
+    check(!manager.cancel(99), "nothing to cancel for an unknown order");
+    check(!run(manager, limit(3, Side::buy, 1, 0)).accepted, "a limit order needs a positive price");
+    check(!run(manager, {4, Side::buy, 1, 100, OrderType::limit, 100}).accepted, "a limit order takes no budget");
+    check(!run(manager, {5, Side::buy, 1, 100, OrderType::market, 0, true}).accepted, "post-only is for limit orders");
+}
+
+void limit_cancel_race_and_session_end()
+{
+    auto settings = config();
+    settings.order_latency_ns = 100;
+    settings.stale_after_ns = 1000000; // trades do not refresh depth; keep the snapshot trusted
+    Simulator simulator(settings);
+    accounting::Account account(1000000, 1000, 100000);
+    OrderManager manager(account, simulator, settings);
+    simulator.on_market_event(event(1, BookSnapshot{1, {{9900, 400}}, {{10100, 500}}}, 0));
+    check(!manager.submit(limit(1, Side::sell, 100, 10100)), "a limit sell is accepted");
+    simulator.on_market_event(event(2, Trade{10000, 1, 21, Aggressor::sell}, 150));
+    auto reports = manager.collect();
+    check(reports.size() == 1 && reports[0].executed_ns == 100 && simulator.queue_ahead(1) == 500,
+          "the order arrives after its latency and rests behind the visible asks");
+    check(manager.cancel(1), "cancel requested at t=150, arriving at t=250");
+    // Before the cancel arrives the market trades through our ask: the fill wins the race.
+    simulator.on_market_event(event(3, Trade{10200, 5, 22, Aggressor::buy}, 200));
+    simulator.on_market_event(event(4, Trade{10200, 5, 23, Aggressor::buy}, 300));
+    reports = manager.collect();
+    check(reports.size() == 1 && reports[0].final && reports[0].result.status == OrderStatus::filled &&
+          manager.in_flight() == 0 && account.balances().base_total == 900 && account.balances().base_reserved == 0,
+          "a cancel arriving after the fill changes nothing");
+    // A resting order at the end of the data is cancelled and releases its BTC.
+    check(!manager.submit(limit(2, Side::sell, 100, 10500)), "another limit sell");
+    simulator.on_market_event(event(5, Trade{10200, 5, 24, Aggressor::buy}, 450));
+    check(manager.collect().size() == 1 && account.balances().base_reserved == 100, "the sell rests");
+    check(manager.cancel_open(Side::buy) == 0, "cancel_open filters by side");
+    simulator.finish();
+    reports = manager.collect();
+    check(reports.size() == 1 && reports[0].interruption == Interruption::session_ended &&
+          reports[0].result.status == OrderStatus::cancelled && account.balances().base_reserved == 0,
+          "resting orders end with the session");
+}
+
 // Test executions answer each submitted order with a scripted result.
 class ScriptedExecution : public Execution {
 public:
     bool available() const override { return true; }
-    void submit(const MarketOrder& order) override { reports_.push_back({answer(order), 0, 0}); }
+    void submit(const Order& order) override { reports_.push_back({answer(order), 0, 0}); }
+    void cancel(std::int64_t) override {}
     std::vector<ExecutionReport> take_reports() override { return std::exchange(reports_, {}); }
 private:
-    virtual ExecutionResult answer(const MarketOrder& order) = 0;
+    virtual ExecutionResult answer(const Order& order) = 0;
     std::vector<ExecutionReport> reports_;
 };
 class UncertainExecution final : public ScriptedExecution {
-    ExecutionResult answer(const MarketOrder&) override { throw std::runtime_error("result unknown"); }
+    ExecutionResult answer(const Order&) override { throw std::runtime_error("result unknown"); }
 };
 class MalformedExecution final : public ScriptedExecution {
-    ExecutionResult answer(const MarketOrder& order) override
+    ExecutionResult answer(const Order& order) override
     { return {order.id, OrderStatus::filled, {}, 0, "invalid empty filled report"}; }
 };
 class DuplicateExecution final : public ScriptedExecution {
-    ExecutionResult answer(const MarketOrder& order) override
+    ExecutionResult answer(const Order& order) override
     {
         const Fill fill{1, order.id, order.side, 100, 1, 1, 0};
         return {order.id, OrderStatus::filled, {fill, fill}, 0, "duplicate confirmed receipt"};
     }
 };
 class RejectedExecution final : public ScriptedExecution {
-    ExecutionResult answer(const MarketOrder& order) override
+    ExecutionResult answer(const Order& order) override
     { return {order.id, OrderStatus::rejected, {}, order.quantity_atoms, "confirmed rejection"}; }
 };
 class StrangerExecution final : public ScriptedExecution {
-    ExecutionResult answer(const MarketOrder& order) override
+    ExecutionResult answer(const Order& order) override
     { return {order.id + 100, OrderStatus::rejected, {}, order.quantity_atoms, "report for an unknown order"}; }
 };
 
@@ -346,6 +460,7 @@ int main()
     try {
         routing_and_liquidity(); budget_and_rounding(); risk_and_freshness(); partial_sell(); uncertain_results();
         latency(); risk_limits();
+        limit_queue_and_fills(); limit_crossing_post_only_and_cancel(); limit_cancel_race_and_session_end();
         std::fputs("Execution, risk, and liquidity checks passed\n", stdout);
         return 0;
     } catch (const std::exception& error) {

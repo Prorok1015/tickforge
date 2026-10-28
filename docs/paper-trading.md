@@ -55,9 +55,9 @@ the units below (price 1e-2 USDT, BTC and USDT amounts 1e-8); no decimals are fo
 
 | File | Rows |
 | --- | --- |
-| `PREFIX-orders.csv` | One per request, including rejections, in report order: submitting event and time, order, signal (`script`, `buy`, `take_profit`, `stop_loss`), side, request, status, filled/remaining quantity, fills, fees, balances, cost basis, and realized PnL after the report, execution and report times (empty for requests rejected before execution), interruption (`none`, `no_trusted_book`, `session_ended`), then the reason. |
-| `PREFIX-fills.csv` | One per confirmed fill: submitting event and time, order, fill ID, side, price, quantity, notional, fee, execution time. |
-| `PREFIX-summary.csv` | `key,value` rows: format and version (currently 3), inputs (session, config path, overrides, account, every execution parameter including latencies, strategy parameters, units), counts including cancelled in-flight orders, final balances and PnL, mark, and `status,complete` last. |
+| `PREFIX-orders.csv` | One per order when it ends (rejections included), in report order: submitting event and time, order, signal (`script`, `buy`, `take_profit`, `stop_loss`), side, type, limit price, post-only, request, status, filled/remaining quantity, fills, fees, balances, cost basis, and realized PnL after the report, execution and report times (empty for requests rejected before execution), interruption (`none`, `no_trusted_book`, `session_ended`), then the reason. |
+| `PREFIX-fills.csv` | One per confirmed fill, including fills of still-resting orders: submitting event and time, order, fill ID, side, price, quantity, notional, fee, execution time, `taker` or `maker`. |
+| `PREFIX-summary.csv` | `key,value` rows: format and version (currently 5), inputs (session, config path, overrides, account, every execution parameter including latencies, strategy parameters, units), counts including cancelled in-flight orders, final balances and PnL, mark, and `status,complete` last. |
 
 Rules that keep experiments comparable and honest:
 
@@ -125,7 +125,8 @@ btc = "0"              # optional, default 0
 btc_cost = "0"         # total USDT cost of the initial BTC; required when btc > 0
 
 [execution]
-fee = "0.1%"           # required
+fee = "0.1%"           # required; taker fee
+maker_fee = "0.02%"    # optional; resting limit fills, default = fee
 quantity_step = "0.00001"
 max_order = "0.01"
 max_position = "0.01"
@@ -143,7 +144,19 @@ after_event = 1        # send right after this market event ordinal
 id = 1
 side = "buy"           # "buy" or "sell"
 quantity = "0.003"     # BTC
-max_spend = "300"      # USDT budget including fees; buys only
+max_spend = "300"      # USDT budget including fees; market buys only
+
+[[orders]]
+after_event = 1
+id = 2
+side = "buy"
+type = "limit"         # "market" (default) or "limit"
+price = "64999.00"     # limit price; the budget is derived from it
+post_only = true       # optional: reject instead of crossing the spread
+
+[[cancels]]            # optional; sent after the orders of the same event
+after_event = 3
+id = 2
 ```
 
 Values are written in human units and converted to integer atoms exactly:
@@ -302,6 +315,49 @@ A "day" is the session for now: recordings are at most an hour long. Calendar-da
 resets matter only for multi-day runs and are not implemented. A manual kill switch
 has no use in replay, where no one can press it mid-run; automatic triggers cover
 that role here.
+
+## Limit orders and the queue model
+
+A limit order executes at its price or better. The part that crosses the spread on
+arrival executes at once like a market order, but never beyond the limit, and pays the
+taker fee. The rest **rests** in the book at its price and pays `maker_fee` when it is
+filled. `post_only` rejects an order that would cross instead of letting it take.
+Without `maker_fee`, resting fills pay the taker fee, so no discount is assumed silently.
+
+Our resting order is invisible to the recorded market. Where it would stand in the real
+queue and when it would fill must therefore be estimated from public data. Every rule
+below is chosen so that the simulation errs towards **fewer** fills than reality:
+
+| Event | Effect on our resting order |
+| --- | --- |
+| Arrival (after `order_latency`) | We join the **back** of the queue: everything visible at our price is ahead. An empty level puts us first. |
+| Opposite-aggressor trade at our price | Consumes the queue ahead of us first; what remains reaches us. Several of our orders at one price share a trade in arrival order. Trades with an unknown aggressor (v1-v3 files) are ignored at our price. |
+| Trade at a worse price (a *trade-through*) | Fills us completely: by price priority the venue would have matched us first. Valid for any aggressor. |
+| The other side of the book reaches our price | Fills us from that crossing size, at our price, and consumes it virtually: those orders would have traded with us. |
+| Our level shrinks without trades | Treated as cancellations **behind** us; the queue ahead only shrinks to the level's new size (it cannot exceed it). Growth is behind us. |
+
+A fill of a resting order happens at our price (the maker's price), not at the
+aggressor's. Each report carries only its new fills; the order stays open with its
+reservation until a terminal report. A limit buy reserves its worst case: the whole
+quantity at the limit price, the higher of the two fees, and two atoms of rounding
+slack per lot; the unused part is released at the end.
+
+**Cancels** travel with `order_latency`. A fill that happens before the cancel arrives
+stands; a cancel that arrives after the order filled does nothing. A cancelled order
+that had fills ends as `partially_filled`. Orders still resting when market data ends
+end with interruption `session_ended`. When the risk guard enters reduce-only, resting
+buys are cancelled; when it halts, all resting orders are.
+
+What this model cannot know, and what to keep in mind when reading results:
+
+- **Market impact.** In reality our order would have taken a place in the queue and
+  absorbed trades that went to others. The larger our order relative to the level,
+  the less the recorded market behind it is valid.
+- **Adverse selection.** A resting order fills when the market moves through it, so
+  fills cluster just before moves against the position. Saving the spread and the
+  taker fee does not by itself make a profit.
+- **Trade gaps.** Trades missed by the feed (see the replay `Trade feed` summary) may
+  hide fills. Queue estimates after a reconnect rely on the new snapshot only.
 
 ## Latency
 

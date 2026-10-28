@@ -112,7 +112,7 @@ CMake carries that link requirement automatically.
 | Header / implementation | Responsibility |
 | --- | --- |
 | `events.hpp` | Shared vocabulary: times, trades, levels, snapshots, depth ranges, and local resets. `MarketEvent` holds one of these payloads. |
-| `orders.hpp` / `amounts.hpp` / `amounts.cpp` | Shared order/fill/result types and checked nonnegative integer monetary arithmetic. |
+| `orders.hpp` / `amounts.hpp` / `amounts.cpp` | Shared order (market/limit), fill (taker/maker), and execution-report types, and checked integer monetary arithmetic. |
 | `order_book.hpp` / `.cpp` | Known price levels in ordered maps, absolute-size updates, best bid/ask, spread, and range validation. |
 | `book_tracker.hpp` / `.cpp` | Decides when the book may be exposed. Buffers depth around REST snapshots, establishes a stream bridge, and hides quotes after resets/gaps. |
 | `recorder.hpp` / `.cpp` | Creates a new recording exclusively, writes normalized events in order, flushes them, and marks successful completion with a footer. |
@@ -214,12 +214,13 @@ unrealized/total PnL, equity, and average cost. They are pure functions of the l
 `execution/execution.hpp` defines the asynchronous interface (`submit`, then
 `take_reports` with execution and report times) and explicit paper settings.
 `simulator.hpp/.cpp` consumes replay events, guards book freshness, delays execution
-and reports by the configured latencies, and simulates fills using separate virtual
-liquidity counters. `risk.hpp/.cpp` (`RiskGuard`) tracks equity against loss,
+and reports by the configured latencies, simulates taker fills using separate virtual
+liquidity counters, and keeps resting limit orders with an estimated queue position
+that recorded trades and book changes advance. `risk.hpp/.cpp` (`RiskGuard`) tracks equity against loss,
 drawdown, and order-rate limits and escalates normal -> reduce-only -> halted.
 `order_manager.hpp/.cpp` asks the guard first, then performs order checks,
-reserves funds, and submits; `collect()` later validates confirmed
-results and commits them to the account.
+reserves funds, and submits or cancels; `collect()` later validates confirmed
+reports (open ones carry partial fills) and commits them to the account.
 
 The app's `paper_command.cpp` connects these pieces; `paper_scenario.*` reads the
 TOML config (with `--set` overrides) into atoms using `core/units`,

@@ -28,7 +28,7 @@ flowchart LR
     Sim --> View[Current quotes and availability]
     Account[accounting: Account] --> View
     View --> Strategy[strategy: Strategy / Threshold]
-    Strategy --> Request[MarketOrder proposal]
+    Strategy --> Request[Order proposal]
     Request --> Manager[execution: OrderManager]
     Manager --> Sim
     Manager --> Account

@@ -30,7 +30,7 @@ public:
     void observe(std::int64_t now_ns, std::optional<std::int64_t> equity_quote);
     // Pre-trade check for every request; counts it for the rate limit. Returns the
     // rejection reason, or nullopt to let the order continue to the other checks.
-    std::optional<std::string> admit(const MarketOrder& order);
+    std::optional<std::string> admit(const Order& order);
     TradingState state() const { return state_; }
     RiskTrigger trigger() const { return trigger_; }
     bool buys_allowed() const { return state_ == TradingState::normal; }

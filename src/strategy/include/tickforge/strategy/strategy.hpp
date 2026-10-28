@@ -22,6 +22,6 @@ struct View {
 class Strategy {
 public:
     virtual ~Strategy() = default;
-    virtual std::optional<MarketOrder> on_market(const View& view) = 0;
+    virtual std::optional<Order> on_market(const View& view) = 0;
 };
 } // namespace tickforge::strategy

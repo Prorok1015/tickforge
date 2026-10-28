@@ -28,6 +28,7 @@ std::string_view status(OrderStatus value)
     case OrderStatus::filled: return "FILLED";
     case OrderStatus::partially_filled: return "PARTIAL (remainder cancelled)";
     case OrderStatus::cancelled: return "CANCELLED";
+    case OrderStatus::open: return "OPEN (resting in the book)";
     case OrderStatus::rejected: return "REJECTED";
     }
     return "UNKNOWN";
@@ -72,13 +73,13 @@ void paper_header(std::string_view session, std::string_view scenario, const Pap
         "Market    | {}\nConfig    | {}\nOverrides | {}\n"
         "Execution | market orders, unfilled remainder cancelled\n"
         "Latency   | order={} ns (decision -> execution) | report={} ns (execution -> confirmed result)\n"
-        "Fee       | {} ppm in USDT (configured assumption, not a live venue fee)\n"
+        "Fee       | taker {} ppm | maker {} ppm, in USDT (configured assumptions, not a live venue tier)\n"
         "Limits    | order={} BTC | position={} BTC | quantity step={} BTC | stale after={} ns\n"
         "Liquidity | consumed virtually; only explicit level updates or snapshots replenish it\n"
         "Risk      | {}\n"
         "Initial   | {} USDT | {} BTC | BTC cost basis={} USDT\n"
         "PnL       | average cost; buy fees in cost, sell fees in proceeds; marked at last trusted bid\n\n",
-        session, scenario, overrides_text(settings.overrides), settings.config.order_latency_ns, settings.config.report_latency_ns, settings.config.fee_ppm,
+        session, scenario, overrides_text(settings.overrides), settings.config.order_latency_ns, settings.config.report_latency_ns, settings.config.fee_ppm, settings.config.maker_fee_ppm,
         quantity_text(settings.config.max_order_quantity_atoms), quantity_text(settings.config.max_position_quantity_atoms),
         quantity_text(settings.config.quantity_step_atoms), settings.config.stale_after_ns, risk_text(settings.risk),
         money(settings.initial_quote_atoms), quantity_text(settings.initial_base_atoms),
@@ -91,18 +92,35 @@ void paper_market(const MarketEvent& event, bool available)
         event.time.ordinal, event.time.receive_elapsed_ns, available ? "AVAILABLE" : "BLOCKED (unavailable/stale book)"));
 }
 
-void paper_order(const execution::OrderReport& report)
+void paper_order(const execution::OrderReport& report, bool first)
 {
-    write_console(std::format("Order #{} | {} {} BTC | max spend={} USDT\n",
-        report.order.id, report.order.side == Side::buy ? "BUY" : "SELL",
-        quantity_text(report.order.quantity_atoms), money(report.order.max_spend_quote_atoms)));
-    if (report.accepted) {
+    const auto& order = report.order;
+    const auto limit = order.type == OrderType::limit
+        ? std::format(" | LIMIT {} USDT{}", price_text(order.limit_price_atoms), order.post_only ? " post-only" : "")
+        : std::string();
+    write_console(std::format("Order #{} | {} {} BTC{} | max spend={} USDT\n",
+        order.id, order.side == Side::buy ? "BUY" : "SELL", quantity_text(order.quantity_atoms), limit,
+        money(order.max_spend_quote_atoms)));
+    if (report.accepted && first) {
         write_console("  ACCEPTED | funds reserved before execution\n");
         balances(report.reserved_balances);
     }
     for (const auto& fill : report.result.fills) {
-        write_console(std::format("  FILL #{} | price={} USDT | quantity={} BTC | notional={} USDT | fee={} USDT\n",
-            fill.id, price_text(fill.price_atoms), quantity_text(fill.quantity_atoms), money(fill.quote_atoms), money(fill.fee_quote_atoms)));
+        write_console(std::format("  FILL #{} | price={} USDT | quantity={} BTC | notional={} USDT | fee={} USDT{}\n",
+            fill.id, price_text(fill.price_atoms), quantity_text(fill.quantity_atoms), money(fill.quote_atoms),
+            money(fill.fee_quote_atoms), fill.liquidity == Liquidity::maker ? " | maker" : ""));
+    }
+    if (!report.final) {
+        // A resting order: fills so far, nothing released yet.
+        write_console(std::format("  RESULT  | {} | remaining={} BTC | {}\n", status(report.result.status),
+            quantity_text(report.result.remaining_quantity_atoms), report.result.reason));
+        if (!report.result.fills.empty()) {
+            write_console("  ACCOUNT | after confirmed fills; the reservation stays until the order ends\n");
+            balances(report.final_balances);
+            position(report.final_balances, report.final_position);
+        }
+        write_console("\n");
+        return;
     }
     write_console(std::format("  RESULT  | {} | remaining={} BTC | {}\n", status(report.result.status),
         quantity_text(report.result.remaining_quantity_atoms), report.result.reason));

@@ -135,10 +135,11 @@ Checked items below are implemented; unchecked items remain planned.
 ### 4. More realistic execution
 
 - [x] Model order submission and report delays.
-- [ ] Model cancellation delays (once resting orders exist).
+- [x] Model cancellation delays: cancels travel with the order latency and can lose the race to a fill.
 - [x] Make the execution interface asynchronous: orders are submitted, and their
   confirmed terminal results are reported later instead of returned at once.
-- [ ] Add limit orders, partial fills, and queue assumptions.
+- [x] Add limit orders, partial fills, and conservative queue assumptions (back of the queue,
+  trade-through, crossing book, cancellations behind us), with maker and taker fees.
 - [ ] Compare results under different execution assumptions.
 - [x] Block decisions on stale or invalid depth.
 - [x] Add an automatic trading stop (order-rate halt).
