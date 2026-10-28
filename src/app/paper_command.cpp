@@ -49,6 +49,7 @@ void paper_session(const PaperOptions& options)
     execution::RiskGuard risk(scenario.risk, amount_add(scenario.initial_quote_atoms, scenario.initial_base_cost_atoms));
     execution::OrderManager manager(account, simulator, scenario.config, &risk);
     PaperTotals totals;
+    Markouts markouts;
     std::size_t next = 0, next_cancel = 0;
     std::optional<Mark> mark;
     // Created before the run so that an existing report fails fast and is never overwritten.
@@ -78,7 +79,9 @@ void paper_session(const PaperOptions& options)
         for (const auto& fill : report.result.fills) {
             totals.fees = amount_add(totals.fees, fill.fee_quote_atoms);
             if (fill.liquidity == Liquidity::maker) ++totals.maker_fills;
+            markouts.fill(fill, report.executed_ns);
         }
+        for (const auto& diagnostic : report.diagnostics) totals.fill_stats.add(diagnostic);
         if (!report.final) return;
         if (report.result.status == OrderStatus::rejected) ++totals.rejected;
         if (report.interruption == execution::Interruption::no_trusted_book) ++totals.cancelled_no_book;
@@ -130,6 +133,11 @@ void paper_session(const PaperOptions& options)
         ++totals.events;
         simulator.on_market_event(event);
         collect();
+        // Report-only: later prices measure earlier fills and never reach the strategy.
+        if (simulator.available())
+            markouts.observe(event.time.receive_elapsed_ns, simulator.book().best_bid(), simulator.book().best_ask());
+        for (const auto& row : markouts.take_done())
+            if (exporter) exporter->markout(row);
         paper_market(event, simulator.available());
         // Recordings end with a shutdown reset, so keep the last trusted bid for valuation.
         if (const auto bid = simulator.book().best_bid(); bid && simulator.available())
@@ -185,8 +193,12 @@ void paper_session(const PaperOptions& options)
     collect();
     if (manager.in_flight() != 0) throw std::runtime_error("orders remain unresolved after the session");
     paper_summary(account, totals.requests, totals.rejected, totals.fills, totals.fees, mark);
+    paper_fill_diagnostics(totals.fill_stats, markouts);
+    for (const auto& row : markouts.take_done(true))
+        if (exporter) exporter->markout(row);
     if (exporter) {
-        exporter->complete(automatic ? "strategy" : "paper", session_path, scenario_path, scenario, account, totals, mark, risk);
+        exporter->complete(automatic ? "strategy" : "paper", session_path, scenario_path, scenario, account, totals,
+                           markouts, mark, risk);
         write_console(std::format("Report    | {}\n", exporter->summary_path()));
     }
 }

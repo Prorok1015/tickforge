@@ -1,6 +1,7 @@
 #include "paper_export.hpp"
 #include <tickforge/accounting/valuation.hpp>
 #include <tickforge/core/amounts.hpp>
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
@@ -56,9 +57,9 @@ void write(std::FILE* file, std::string_view text)
 
 PaperExport::PaperExport(std::string_view prefix)
     : orders_path_(std::format("{}-orders.csv", prefix)), fills_path_(std::format("{}-fills.csv", prefix)),
-      summary_path_(std::format("{}-summary.csv", prefix))
+      markouts_path_(std::format("{}-markouts.csv", prefix)), summary_path_(std::format("{}-summary.csv", prefix))
 {
-    for (const auto* path : {&orders_path_, &fills_path_, &summary_path_})
+    for (const auto* path : {&orders_path_, &fills_path_, &markouts_path_, &summary_path_})
         if (std::filesystem::exists(*path)) throw std::runtime_error(std::format("report '{}' already exists", *path));
     const auto create = [](const std::string& path) {
         File file(std::fopen(path.c_str(), "wx"));
@@ -67,13 +68,17 @@ PaperExport::PaperExport(std::string_view prefix)
     };
     orders_ = create(orders_path_);
     fills_ = create(fills_path_);
+    markouts_ = create(markouts_path_);
     // Times are recorded session offsets: submission, execution at the venue, report to us.
     write(orders_.get(), "submitted_event_ordinal,submitted_ns,order_id,signal,side,type,limit_price_atoms,post_only,"
         "quantity_atoms,max_spend_quote_atoms,accepted,status,filled_quantity_atoms,remaining_quantity_atoms,fill_count,"
         "fee_quote_atoms,quote_total_atoms,base_total_atoms,cost_basis_quote_atoms,realized_pnl_quote_atoms,"
         "executed_ns,reported_ns,interruption,reason\n");
     write(fills_.get(), "submitted_event_ordinal,submitted_ns,order_id,fill_id,side,price_atoms,quantity_atoms,"
-        "quote_atoms,fee_quote_atoms,executed_ns,liquidity\n");
+        "quote_atoms,fee_quote_atoms,executed_ns,liquidity,source,entry_queue_atoms,level_share_ppm,since_gap_ns\n");
+    // Signed quote atoms for the fill quantity; empty when the session ended first.
+    write(markouts_.get(), "fill_id,order_id,side,liquidity,price_atoms,quantity_atoms,executed_ns,"
+        "markout_1s_quote_atoms,markout_10s_quote_atoms,markout_60s_quote_atoms\n");
 }
 
 void PaperExport::order(const EventTime& submitted, std::string_view signal, const execution::OrderReport& report)
@@ -82,9 +87,20 @@ void PaperExport::order(const EventTime& submitted, std::string_view signal, con
     auto& fill_count = fill_counts_[report.order.id];
     for (const auto& fill : result.fills) {
         ++fill_count;
-        write(fills_.get(), std::format("{},{},{},{},{},{},{},{},{},{},{}\n", submitted.ordinal, submitted.receive_elapsed_ns,
+        // Simulator evidence; queue position and level share apply to resting fills only.
+        const auto found = std::find_if(report.diagnostics.begin(), report.diagnostics.end(),
+            [&](const execution::FillDiagnostic& note) { return note.fill_id == fill.id; });
+        std::string evidence = ",,,";
+        if (found != report.diagnostics.end()) {
+            const bool resting = found->source != execution::FillSource::take;
+            evidence = std::format("{},{},{},{}", execution::source_name(found->source),
+                resting ? std::format("{}", found->entry_queue_atoms) : std::string(),
+                resting ? std::format("{}", found->level_share_ppm) : std::string(),
+                found->since_gap_ns ? std::format("{}", *found->since_gap_ns) : std::string());
+        }
+        write(fills_.get(), std::format("{},{},{},{},{},{},{},{},{},{},{},{}\n", submitted.ordinal, submitted.receive_elapsed_ns,
             fill.order_id, fill.id, side_name(fill.side), fill.price_atoms, fill.quantity_atoms, fill.quote_atoms,
-            fill.fee_quote_atoms, report.executed_ns, fill.liquidity == Liquidity::maker ? "maker" : "taker"));
+            fill.fee_quote_atoms, report.executed_ns, fill.liquidity == Liquidity::maker ? "maker" : "taker", evidence));
     }
     // One order row per order, written when it ends, with cumulative totals.
     if (!report.final) return;
@@ -104,18 +120,27 @@ void PaperExport::order(const EventTime& submitted, std::string_view signal, con
     fill_counts_.erase(order.id);
 }
 
+void PaperExport::markout(const MarkoutRow& row)
+{
+    const auto value = [](std::optional<std::int64_t> v) { return v ? std::format("{}", *v) : std::string(); };
+    const auto& fill = row.fill;
+    write(markouts_.get(), std::format("{},{},{},{},{},{},{},{},{},{}\n", fill.id, fill.order_id, side_name(fill.side),
+        fill.liquidity == Liquidity::maker ? "maker" : "taker", fill.price_atoms, fill.quantity_atoms, row.executed_ns,
+        value(row.quote_atoms[0]), value(row.quote_atoms[1]), value(row.quote_atoms[2])));
+}
+
 void PaperExport::complete(std::string_view command, std::string_view session, std::string_view scenario_path,
-                           const PaperScenario& scenario, const accounting::Account& account,
-                           const PaperTotals& totals, std::optional<Mark> mark, const execution::RiskGuard& risk)
+                           const PaperScenario& scenario, const accounting::Account& account, const PaperTotals& totals,
+                           const Markouts& markouts, std::optional<Mark> mark, const execution::RiskGuard& risk)
 {
     // The journals must be on disk before the summary claims completion.
-    for (auto* file : {&orders_, &fills_})
+    for (auto* file : {&orders_, &fills_, &markouts_})
         if (std::fclose(file->release()) != 0) throw std::runtime_error("report close failed");
 
     std::vector<std::pair<std::string, std::string>> rows;
     const auto add = [&](std::string key, auto value) { rows.emplace_back(std::move(key), std::format("{}", value)); };
     add("format", "tickforge-paper-summary");
-    add("version", 5);
+    add("version", 6);
     add("command", command);
     add("session", csv(session));
     add("config", csv(scenario_path));
@@ -160,6 +185,21 @@ void PaperExport::complete(std::string_view command, std::string_view session, s
     add("maker_fills", totals.maker_fills);
     add("cancelled_no_trusted_book", totals.cancelled_no_book);
     add("cancelled_session_ended", totals.cancelled_at_end);
+    for (const auto source : {execution::FillSource::take, execution::FillSource::trade_through,
+                              execution::FillSource::book_cross, execution::FillSource::queue})
+        add(std::format("fills_{}", execution::source_name(source)), totals.fill_stats.by_source[static_cast<std::size_t>(source)]);
+    add("fills_near_data_gap", totals.fill_stats.near_gap);
+    add("max_level_share_ppm", totals.fill_stats.max_level_share_ppm);
+    for (const auto liquidity : {Liquidity::taker, Liquidity::maker}) {
+        const std::string_view name = liquidity == Liquidity::maker ? "maker" : "taker";
+        for (std::size_t h = 0; h < markout_horizons_ns.size(); ++h) {
+            const auto& total = markouts.total(liquidity, h);
+            const auto label = std::format("{}_markout_{}s", name, markout_horizons_ns[h] / 1000000000);
+            add(label + "_fills", total.fills);
+            add(label + "_quantity_atoms", total.quantity_atoms);
+            add(label + "_quote_atoms", total.quote_atoms);
+        }
+    }
     const auto& balances = account.balances();
     const auto& position = account.position();
     add("quote_total_atoms", balances.quote_total);
@@ -189,6 +229,7 @@ void PaperExport::complete(std::string_view command, std::string_view session, s
     add("peak_equity_quote_atoms", risk.peak_equity());
     add("orders_file", csv(std::filesystem::path(orders_path_).filename().string()));
     add("fills_file", csv(std::filesystem::path(fills_path_).filename().string()));
+    add("markouts_file", csv(std::filesystem::path(markouts_path_).filename().string()));
     add("status", "complete");
 
     File summary(std::fopen(summary_path_.c_str(), "wx"));

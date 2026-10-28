@@ -140,6 +140,8 @@ Checked items below are implemented; unchecked items remain planned.
   confirmed terminal results are reported later instead of returned at once.
 - [x] Add limit orders, partial fills, and conservative queue assumptions (back of the queue,
   trade-through, crossing book, cancellations behind us), with maker and taker fees.
+- [x] Report per-fill evidence (source, queue at entry, level share, nearby data gaps)
+  and post-fill markouts at 1 s, 10 s, and 60 s.
 - [ ] Compare results under different execution assumptions.
 - [x] Block decisions on stale or invalid depth.
 - [x] Add an automatic trading stop (order-rate halt).

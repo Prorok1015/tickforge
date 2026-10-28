@@ -50,23 +50,24 @@ mkdir -p reports
 ./build/tickforge paper examples/synthetic-book.csv --config examples/paper-orders.toml --report reports/example
 ```
 
-This writes three CSV files next to the console journal. All values are integers in
+This writes four CSV files next to the console journal. All values are integers in
 the units below (price 1e-2 USDT, BTC and USDT amounts 1e-8); no decimals are formatted.
 
 | File | Rows |
 | --- | --- |
 | `PREFIX-orders.csv` | One per order when it ends (rejections included), in report order: submitting event and time, order, signal (`script`, `buy`, `take_profit`, `stop_loss`), side, type, limit price, post-only, request, status, filled/remaining quantity, fills, fees, balances, cost basis, and realized PnL after the report, execution and report times (empty for requests rejected before execution), interruption (`none`, `no_trusted_book`, `session_ended`), then the reason. |
-| `PREFIX-fills.csv` | One per confirmed fill, including fills of still-resting orders: submitting event and time, order, fill ID, side, price, quantity, notional, fee, execution time, `taker` or `maker`. |
-| `PREFIX-summary.csv` | `key,value` rows: format and version (currently 5), inputs (session, config path, overrides, account, every execution parameter including latencies, strategy parameters, units), counts including cancelled in-flight orders, final balances and PnL, mark, and `status,complete` last. |
+| `PREFIX-fills.csv` | One per confirmed fill, including fills of still-resting orders: submitting event and time, order, fill ID, side, price, quantity, notional, fee, execution time, `taker` or `maker`, then the [fill diagnostics](#fill-diagnostics-and-markouts): source, queue at entry and level share at fill time (resting fills only), time since the last data gap (empty if none). |
+| `PREFIX-markouts.csv` | One per fill once its last horizon is measured (or the session ended): fill, order, side, liquidity, price, quantity, execution time, and the markout after 1 s, 10 s, and 60 s in signed quote atoms (empty when the session ended first). |
+| `PREFIX-summary.csv` | `key,value` rows: format and version (currently 6), inputs (session, config path, overrides, account, every execution parameter including latencies, strategy parameters, units), counts including cancelled in-flight orders and fills by source, fills near a data gap, the largest level share, markout totals per liquidity and horizon (fills, quantity, quote atoms), final balances and PnL, mark, and `status,complete` last. |
 
 Rules that keep experiments comparable and honest:
 
 - **Inputs are recorded with results.** A summary lists every parameter that
   produced it, so it can be reproduced from the same session file without guessing.
-- **Nothing is overwritten.** All three files must be new; an existing report fails
+- **Nothing is overwritten.** All four files must be new; an existing report fails
   the run before any market event is processed.
 - **Completion is explicit.** Order and fill journals grow during the run. The
-  summary is created only after both are closed, and its last row is
+  summary is created only after they are closed, and its last row is
   `status,complete`. A failed run leaves journals without a summary; treat them as
   incomplete, like a recording without its footer.
 - **Unavailable is empty, not zero.** If BTC is held and no trusted bid was ever
@@ -358,6 +359,58 @@ What this model cannot know, and what to keep in mind when reading results:
   taker fee does not by itself make a profit.
 - **Trade gaps.** Trades missed by the feed (see the replay `Trade feed` summary) may
   hide fills. Queue estimates after a reconnect rely on the new snapshot only.
+
+## Fill diagnostics and markouts
+
+The model above produces fills, but not all of them are equally believable. Every
+simulated fill therefore carries the evidence behind it, printed after the run and
+written to the reports:
+
+```text
+  FILLS   | take 1 | trade_through 0 | book_cross 0 | queue 1 | within 1 s of a data gap 0 | max level share 0.0500%
+  MARKOUT | maker | 1s -0.00120000 USDT over 1 fills (-1.20 USDT/BTC) | 10s ... | 60s ...
+  MARKOUT | taker | ...
+```
+
+**Source**, from the strongest evidence to the weakest for a resting order:
+
+| Source | Evidence | Trust |
+| --- | --- | --- |
+| `take` | Our order crossed the spread and consumed visible depth. | As good as the depth view. |
+| `trade_through` | The venue printed a trade beyond our price; by price priority we would have filled first. | Strongest for a resting order: a real trade, independent of queue position. |
+| `book_cross` | The opposite side of the 100 ms depth stream reached our price. | Good, but no trade print confirms the size we took. |
+| `queue` | Trades at our price used up our *estimated* queue position. | Weakest: depends on where we really stood and on whom the cancellations hit. |
+
+**Queue at entry** is the visible size at our price when the order started resting;
+we join behind all of it. **Level share** is measured when a fill happens: our resting
+quantity before the fill divided by the size still visible at our price plus ours. It
+is taken at fill time because an order placed away from the market often starts alone
+at an empty price, which says nothing about impact; what matters is how large we are
+when the market actually trades there. It is not a measure of strategy quality but of
+how far the recording still describes a market with us in it: at a fraction of a
+percent our order would hardly have been noticed; at tens of percent others would
+have reacted, and the replay no longer shows what would have happened. A share near
+100% means the level was empty apart from us at that moment, typically when the
+price jumped through it.
+
+**Near a data gap** counts fills that happened within 1 s after the last trade ID gap
+or reorder, or after the book lost synchronization. Missed trades can make queue
+estimates and trade-through fills wrong in either direction.
+
+**Markout** measures what the market did right after each fill: the first trusted
+mid price at or after `fill time + horizon` (1 s, 10 s, 60 s), compared with the fill
+price, times the fill quantity. It is positive when the market moved in our favour
+(above our buy price, below our sell price). Fees are not included. A resting order
+fills exactly when someone is eager to trade against it, so maker markouts are
+typically negative: this is adverse selection, the price paid for earning the spread.
+A maker strategy is viable only if the spread it earns (plus any rebate) exceeds that
+loss on average.
+
+Markouts read market data from after the fill, so they are computed only in the
+report layer and never reach a strategy: a decision that could see them would be
+using the future (look-ahead bias). A report delayed past a horizon by
+`report_latency` is measured when it arrives. Fills too close to the end of the
+session leave the later horizons empty, which is "unknown", not zero.
 
 ## Latency
 

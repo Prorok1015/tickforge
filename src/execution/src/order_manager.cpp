@@ -130,6 +130,7 @@ OrderReport OrderManager::commit(ExecutionReport report)
     out.final = !resting;
     out.filled_quantity_atoms = filled;
     out.fee_quote_atoms = fees;
+    out.diagnostics = std::move(report.diagnostics);
     if (resting) {
         pending.filled = filled;
         pending.fees = fees;

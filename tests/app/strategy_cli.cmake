@@ -184,7 +184,8 @@ foreach(expected IN ITEMS "Strategy  | threshold_maker | post-only bid at <= 100
         message(FATAL_ERROR "Maker strategy missing: ${expected}\n${output}\n${error}")
     endif()
 endforeach()
-if(NOT summary MATCHES "strategy,threshold_maker\n" OR NOT summary MATCHES "maker_fills,2\n")
+if(NOT summary MATCHES "strategy,threshold_maker\n" OR NOT summary MATCHES "maker_fills,2\n"
+        OR NOT summary MATCHES "fills_queue,2\n" OR NOT output MATCHES "maker via queue")
     message(FATAL_ERROR "Maker summary mismatch: ${summary}")
 endif()
 file(REMOVE_RECURSE "${reports}")

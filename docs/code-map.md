@@ -50,7 +50,8 @@ tickforge/
       paper_command.cpp            offline paper trading command
       paper_scenario.*             TOML experiment config, overrides, schema checks
       paper_reporter.*             virtual-order/account journal
-      paper_export.*               machine-readable order/fill/summary CSV reports
+      paper_export.*               machine-readable order/fill/markout/summary CSV reports
+      paper_diagnostics.*          fill evidence counts and post-fill markouts (report-only)
   tests/
     CMakeLists.txt
     core/                          session, synchronization, and book contracts
@@ -225,7 +226,10 @@ reports (open ones carry partial fills) and commits them to the account.
 The app's `paper_command.cpp` connects these pieces; `paper_scenario.*` reads the
 TOML config (with `--set` overrides) into atoms using `core/units`,
 experimental inputs, `paper_reporter.*` prints the operation journal, and
-`paper_export.*` optionally writes the CSV reports. No new
+`paper_export.*` optionally writes the CSV reports. `paper_diagnostics.*` counts the
+simulator's per-fill evidence (`execution::FillDiagnostic`: source, queue at entry,
+level share, time since a data gap) and measures markouts from later trusted mids; it
+lives in the app because it reads the future and must never feed a strategy. No new
 network or console dependency is introduced into the ledger/execution libraries.
 See [paper trading](paper-trading.md) for units, config syntax, assumptions,
 example balances, PnL rules, and failure behavior.

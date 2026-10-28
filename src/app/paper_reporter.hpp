@@ -1,5 +1,6 @@
 #pragma once
 #include "paper_scenario.hpp"
+#include "paper_diagnostics.hpp"
 #include <tickforge/core/events.hpp>
 #include <tickforge/execution/order_manager.hpp>
 
@@ -19,4 +20,6 @@ void paper_market(const MarketEvent& event, bool available);
 void paper_order(const execution::OrderReport& report, bool first = true);
 void paper_summary(const accounting::Account& account, std::size_t orders, std::size_t rejected,
                    std::size_t fills, std::int64_t fees, std::optional<Mark> mark);
+// How far simulated fills can be trusted, and what the market did right after them.
+void paper_fill_diagnostics(const FillStats& stats, const Markouts& markouts);
 }

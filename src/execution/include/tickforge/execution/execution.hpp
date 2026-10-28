@@ -1,5 +1,7 @@
 #pragma once
 #include <tickforge/core/orders.hpp>
+#include <optional>
+#include <string_view>
 #include <vector>
 
 namespace tickforge::execution {
@@ -22,6 +24,28 @@ struct PaperConfig {
 // Why an accepted order ended without executing against a book.
 enum class Interruption { none, no_trusted_book, session_ended };
 
+// How a simulated fill came about, from strongest to weakest evidence for resting orders:
+// take: our order crossed the spread and consumed visible depth;
+// trade_through: a recorded trade printed beyond our resting price;
+// book_cross: the opposite side of the recorded book reached our price, no trade print;
+// queue: trades at our price used up our estimated queue position.
+enum class FillSource { take, trade_through, book_cross, queue };
+std::string_view source_name(FillSource source);
+
+// Simulator-only evidence about one fill; a real venue reports none of this.
+struct FillDiagnostic {
+    std::int64_t fill_id;
+    FillSource source;
+    // Resting fills only (zero for take): the visible size at our price when the order
+    // started resting, all of it ahead of us, and, when the fill happened, our resting
+    // quantity before it as a share of the level including us.
+    std::int64_t entry_queue_atoms = 0;
+    std::int64_t level_share_ppm = 0;
+    // Session time since the last market-data gap (a trade ID gap or reorder, or the
+    // book losing synchronization); nullopt when none occurred before the fill.
+    std::optional<std::int64_t> since_gap_ns = std::nullopt;
+};
+
 // A confirmed execution report and when it happened on the session timeline
 // (recorded monotonic receive offsets): executed at the venue, then reported to us.
 struct ExecutionReport {
@@ -29,6 +53,7 @@ struct ExecutionReport {
     std::int64_t executed_ns;
     std::int64_t reported_ns;
     Interruption interruption = Interruption::none;
+    std::vector<FillDiagnostic> diagnostics = {}; // one per fill, if the venue knows
 };
 
 // Asynchronous contract: submit() hands over an order; its reports arrive later through

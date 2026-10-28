@@ -307,6 +307,10 @@ void limit_queue_and_fills()
           reports[0].result.fills[0].liquidity == Liquidity::maker && reports[0].result.fills[0].fee_quote_atoms == 2 &&
           account.balances().base_total == 30 && account.balances().quote_reserved > 0,
           "the part of a trade beyond the queue fills us at our price with the maker fee");
+    check(reports[0].diagnostics.size() == 1 && reports[0].diagnostics[0].fill_id == reports[0].result.fills[0].id &&
+          reports[0].diagnostics[0].source == FillSource::queue && reports[0].diagnostics[0].entry_queue_atoms == 400 &&
+          reports[0].diagnostics[0].level_share_ppm == 200000 && !reports[0].diagnostics[0].since_gap_ns,
+          "a queue fill records the queue and our 100 of 500 at entry; consecutive trade IDs are no gap");
     simulator.on_market_event(event(5, BookUpdate{2, 2, {{9900, 900}}, {}}));
     check(simulator.queue_ahead(1) == 0, "new orders at our price join behind us");
     simulator.on_market_event(event(6, Trade{9800, 1, 14, Aggressor::sell}));
@@ -314,6 +318,8 @@ void limit_queue_and_fills()
     check(reports.size() == 1 && reports[0].final && reports[0].result.status == OrderStatus::filled &&
           reports[0].result.fills[0].quantity_atoms == 70 && reports[0].filled_quantity_atoms == 100 &&
           reports[0].fee_quote_atoms == 2 + 4, "a trade below our bid means the market traded through us");
+    check(reports[0].diagnostics.size() == 1 && reports[0].diagnostics[0].source == FillSource::trade_through,
+          "a trade-through fill names its evidence");
     check(account.balances().base_total == 100 && account.balances().quote_reserved == 0 &&
           account.balances().quote_total == 1000000 - 2970 - 2 - 6930 - 4, "maker fills and fees reconcile exactly");
 }
@@ -335,6 +341,8 @@ void limit_crossing_post_only_and_cancel()
     check(reports.size() == 1 && reports[0].result.status == OrderStatus::open && reports[0].result.fills.size() == 1 &&
           reports[0].result.fills[0].liquidity == Liquidity::taker && reports[0].result.fills[0].quantity_atoms == 500 &&
           simulator.queue_ahead(2) == 0, "the crossing part takes at most the limit price; the rest rests first in line");
+    check(reports[0].diagnostics.size() == 1 && reports[0].diagnostics[0].source == FillSource::take &&
+          reports[0].diagnostics[0].entry_queue_atoms == 0, "the crossing part is a take fill");
     // The asks move below our resting bid: those sellers would have hit us at our price.
     simulator.on_market_event(event(2, BookUpdate{2, 2, {}, {{10100, 0}, {10050, 30}}}));
     reports = manager.collect();
@@ -342,6 +350,8 @@ void limit_crossing_post_only_and_cancel()
           reports[0].result.fills[0].quantity_atoms == 30 && reports[0].result.fills[0].liquidity == Liquidity::maker &&
           simulator.executable_level(Side::buy)->price_atoms == 10200,
           "a book crossing our price fills us from the crossing size and consumes it");
+    check(reports[0].diagnostics.size() == 1 && reports[0].diagnostics[0].source == FillSource::book_cross &&
+          reports[0].diagnostics[0].level_share_ppm == 1000000, "a book-cross fill; we were the whole level at entry");
     check(manager.cancel(2) && !manager.cancel(2), "a cancel is requested once");
     reports = manager.collect();
     check(reports.size() == 1 && reports[0].final && reports[0].result.status == OrderStatus::partially_filled &&

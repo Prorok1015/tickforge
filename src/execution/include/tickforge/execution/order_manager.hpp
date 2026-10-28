@@ -22,6 +22,7 @@ struct OrderReport {
     bool final = true;                    // false: the order still rests and more reports follow
     std::int64_t filled_quantity_atoms = 0; // cumulative for this order
     std::int64_t fee_quote_atoms = 0;       // cumulative for this order
+    std::vector<FillDiagnostic> diagnostics = {}; // for the fills of this report
 };
 
 struct OpenOrder {

@@ -49,6 +49,7 @@ private:
         std::int64_t queue_ahead;
         std::int64_t budget_left; // buys: unspent part of the reservation
         bool filled_any = false;
+        std::int64_t entry_queue = 0; // diagnostics: visible size ahead when resting began
     };
     struct Action { std::variant<Order, std::int64_t> what; std::int64_t due_ns; }; // submit or cancel
     bool available_at(std::int64_t time) const;
@@ -60,8 +61,12 @@ private:
     void match_trade(const Trade& trade, std::int64_t time);
     void match_book(std::int64_t time);
     void fill_resting(Resting& resting, std::int64_t quantity, std::vector<Fill>& fills);
-    void report_fills(Resting& resting, std::vector<Fill> fills, std::int64_t time, std::string_view done);
-    void report(ExecutionResult result, std::int64_t time, Interruption why = Interruption::none);
+    void report_fills(Resting& resting, std::vector<Fill> fills, std::int64_t time, std::string_view done, FillSource source);
+    void report(ExecutionResult result, std::int64_t time, Interruption why = Interruption::none,
+                std::vector<FillDiagnostic> diagnostics = {});
+    std::vector<FillDiagnostic> diagnose(const std::vector<Fill>& fills, FillSource source, std::int64_t time,
+                                         const Resting* resting) const;
+    void note_trade_id(const Trade& trade);
     std::int64_t level_size(Side side, std::int64_t price) const;
     PaperConfig config_;
     BookTracker tracker_;
@@ -70,6 +75,9 @@ private:
     std::int64_t now_ns_ = 0;
     std::int64_t ordinal_ = 0;
     std::int64_t next_fill_id_ = 1;
+    std::optional<std::int64_t> last_trade_id_;
+    std::optional<std::int64_t> last_gap_ns_; // diagnostics: last trade ID gap or loss of book sync
+    bool synchronized_ = false;
     std::deque<Action> in_flight_; // due times are nondecreasing: fixed latency, monotonic time
     std::vector<Resting> resting_; // arrival order
     std::vector<ExecutionReport> reports_;

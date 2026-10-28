@@ -19,6 +19,17 @@ std::int64_t fee(std::int64_t quote, std::int64_t ppm)
 }
 }
 
+std::string_view source_name(FillSource source)
+{
+    switch (source) {
+    case FillSource::take: return "take";
+    case FillSource::trade_through: return "trade_through";
+    case FillSource::book_cross: return "book_cross";
+    case FillSource::queue: return "queue";
+    }
+    return "unknown";
+}
+
 void validate_config(const PaperConfig& config)
 {
     if (config.fee_ppm < 0 || config.fee_ppm > 1000000 || config.maker_fee_ppm < 0 || config.maker_fee_ppm > 1000000 ||
@@ -43,13 +54,16 @@ void Simulator::on_market_event(const MarketEvent& event)
     std::visit([&](const auto& data) {
         using T = std::decay_t<decltype(data)>;
         if constexpr (std::is_same_v<T, Trade>) {
+            note_trade_id(data);
             match_trade(data, now_ns_);
         } else {
             const auto result = tracker_.apply(data);
             if constexpr (std::is_same_v<T, BookSnapshot> || std::is_same_v<T, BookReset>) {
                 consumed_bids_.clear(); consumed_asks_.clear();
             }
-            if (!tracker_.view().synchronized()) {
+            if (synchronized_ && !tracker_.view().synchronized()) last_gap_ns_ = now_ns_;
+            synchronized_ = tracker_.view().synchronized();
+            if (!synchronized_) {
                 consumed_bids_.clear(); consumed_asks_.clear();
                 last_fresh_ns_.reset();
             } else if (result == BookResult::applied || result == BookResult::snapshot) {
@@ -63,6 +77,33 @@ void Simulator::on_market_event(const MarketEvent& event)
             }
         }
     }, event.data);
+}
+
+void Simulator::note_trade_id(const Trade& trade)
+{
+    // Unknown IDs (older formats) cannot reveal gaps.
+    if (trade.trade_id == 0) return;
+    if (last_trade_id_ && trade.trade_id != *last_trade_id_ + 1) last_gap_ns_ = now_ns_;
+    last_trade_id_ = trade.trade_id;
+}
+
+std::vector<FillDiagnostic> Simulator::diagnose(const std::vector<Fill>& fills, FillSource source, std::int64_t time,
+                                                const Resting* resting) const
+{
+    // Our share of the level when the market reached it: what rested before these fills
+    // against the size still visible at our price (the book does not yet show the fill).
+    std::int64_t share = 0;
+    if (resting) {
+        auto before = resting->remaining;
+        for (const auto& fill : fills) before = amount_add(before, fill.quantity_atoms);
+        const auto level = level_size(resting->order.side, resting->order.limit_price_atoms);
+        share = amount_fraction(1000000, before, amount_add(level, before), false);
+    }
+    std::vector<FillDiagnostic> notes;
+    for (const auto& fill : fills)
+        notes.push_back({fill.id, source, resting ? resting->entry_queue : 0, share,
+                         last_gap_ns_ ? std::optional(time - *last_gap_ns_) : std::nullopt});
+    return notes;
 }
 
 bool Simulator::available() const { return available_at(now_ns_); }
@@ -96,9 +137,9 @@ void Simulator::run_due(std::int64_t before_ns)
     }
 }
 
-void Simulator::report(ExecutionResult result, std::int64_t time, Interruption why)
+void Simulator::report(ExecutionResult result, std::int64_t time, Interruption why, std::vector<FillDiagnostic> diagnostics)
 {
-    reports_.push_back({std::move(result), time, amount_add(time, config_.report_latency_ns), why});
+    reports_.push_back({std::move(result), time, amount_add(time, config_.report_latency_ns), why, std::move(diagnostics)});
 }
 
 void Simulator::interrupt(const Order& order, std::int64_t time, Interruption why)
@@ -111,7 +152,11 @@ void Simulator::interrupt(const Order& order, std::int64_t time, Interruption wh
 void Simulator::arrive(const Order& order, std::int64_t time)
 {
     if (!available_at(time)) return interrupt(order, time, Interruption::no_trusted_book);
-    if (order.type == OrderType::market) return report(take(order, time, std::nullopt), time);
+    if (order.type == OrderType::market) {
+        auto result = take(order, time, std::nullopt);
+        auto notes = diagnose(result.fills, FillSource::take, time, nullptr);
+        return report(std::move(result), time, Interruption::none, std::move(notes));
+    }
     const auto limit = order.limit_price_atoms;
     if (limit <= 0) return report({order.id, OrderStatus::rejected, {}, order.quantity_atoms, "invalid limit price"}, time);
     const auto opposite = executable_level(order.side);
@@ -123,18 +168,19 @@ void Simulator::arrive(const Order& order, std::int64_t time)
     // The crossing part takes liquidity like a market order, but never beyond the limit.
     auto result = crosses ? take(order, time, limit)
                           : ExecutionResult{order.id, OrderStatus::open, {}, order.quantity_atoms, ""};
+    auto notes = diagnose(result.fills, FillSource::take, time, nullptr);
     if (result.status == OrderStatus::rejected || result.remaining_quantity_atoms == 0)
-        return report(std::move(result), time);
+        return report(std::move(result), time, Interruption::none, std::move(notes));
     std::int64_t spent = 0;
     for (const auto& fill : result.fills) spent = amount_add(spent, amount_add(fill.quote_atoms, fill.fee_quote_atoms));
     // We join the back of the queue: everything already visible at our price is ahead.
     const auto ahead = level_size(order.side, limit);
     resting_.push_back({order, result.remaining_quantity_atoms, ahead,
                         order.side == Side::buy ? amount_subtract(order.max_spend_quote_atoms, spent) : 0,
-                        !result.fills.empty()});
+                        !result.fills.empty(), ahead});
     result.status = OrderStatus::open;
     result.reason = std::format("resting; {} atoms ahead in queue", ahead);
-    report(std::move(result), time);
+    report(std::move(result), time, Interruption::none, std::move(notes));
 }
 
 std::int64_t Simulator::level_size(Side side, std::int64_t price) const
@@ -169,12 +215,14 @@ void Simulator::fill_resting(Resting& resting, std::int64_t quantity, std::vecto
     resting.filled_any = true;
 }
 
-void Simulator::report_fills(Resting& resting, std::vector<Fill> fills, std::int64_t time, std::string_view done)
+void Simulator::report_fills(Resting& resting, std::vector<Fill> fills, std::int64_t time, std::string_view done,
+                             FillSource source)
 {
     if (fills.empty()) return;
     const auto filled = resting.remaining == 0;
+    auto notes = diagnose(fills, source, time, &resting);
     report({resting.order.id, filled ? OrderStatus::filled : OrderStatus::open, std::move(fills), resting.remaining,
-            filled ? std::string(done) : "partially filled; still resting"}, time);
+            filled ? std::string(done) : "partially filled; still resting"}, time, Interruption::none, std::move(notes));
 }
 
 void Simulator::match_trade(const Trade& trade, std::int64_t time)
@@ -186,12 +234,14 @@ void Simulator::match_trade(const Trade& trade, std::int64_t time)
         const auto price = order.limit_price_atoms;
         const bool buy = order.side == Side::buy;
         std::vector<Fill> fills;
+        auto source = FillSource::trade_through;
         // A trade at a worse price than ours means the market traded through our level:
         // by price priority we would have been filled first. Valid for any aggressor.
         if (buy ? trade.price_atoms < price : trade.price_atoms > price) {
             fill_resting(resting, resting.remaining, fills);
         } else if (trade.price_atoms == price && trade.aggressor == (buy ? Aggressor::sell : Aggressor::buy)) {
             // The trade first consumes the queue ahead of us, then reaches us.
+            source = FillSource::queue;
             const auto consumed = std::min(trade.quantity_atoms, resting.queue_ahead);
             resting.queue_ahead -= consumed;
             auto& shared = given[{order.side, price}];
@@ -200,7 +250,7 @@ void Simulator::match_trade(const Trade& trade, std::int64_t time)
             fill_resting(resting, reaching, fills);
             shared += before - resting.remaining;
         }
-        report_fills(resting, std::move(fills), time, "filled");
+        report_fills(resting, std::move(fills), time, "filled", source);
     }
     std::erase_if(resting_, [](const Resting& resting) { return resting.remaining == 0; });
 }
@@ -227,7 +277,7 @@ void Simulator::match_book(std::int64_t time)
             fill_resting(resting, level.quantity_atoms > used ? level.quantity_atoms - used : 0, fills);
             used = amount_add(used, before - resting.remaining);
         }
-        report_fills(resting, std::move(fills), time, "filled by a crossing book");
+        report_fills(resting, std::move(fills), time, "filled by a crossing book", FillSource::book_cross);
     }
     std::erase_if(resting_, [](const Resting& resting) { return resting.remaining == 0; });
 }

@@ -143,7 +143,7 @@ foreach(expected IN ITEMS
         message(FATAL_ERROR "Order journal missing: ${expected}\n${orders}\n${error}")
     endif()
 endforeach()
-foreach(expected IN ITEMS "version,5\n" "command,paper\n" "config,\"${comma_config}\"\n"
+foreach(expected IN ITEMS "version,6\n" "command,paper\n" "config,\"${comma_config}\"\n"
         "overrides,execution.stale_after=5s\n" "fee_ppm,1000\n" "stale_after_ns,5000000000\n"
         "strategy,script\n" "script_orders,8\n"
         "requests,8\nrejected,1\nfills,8\nfees_quote_atoms,78001350\n" "realized_pnl_quote_atoms,-39757401\n"
@@ -202,8 +202,10 @@ file(READ "${reports}/limits-orders.csv" orders)
 file(READ "${reports}/limits-fills.csv" fills)
 foreach(expected IN ITEMS "Fee       | taker 1000 ppm | maker 200 ppm"
         "Order #1 | BUY 0.00100000 BTC | LIMIT 99.00 USDT" "OPEN (resting in the book)"
-        "price=99.00 USDT | quantity=0.00030000 BTC | notional=0.02970000 USDT | fee=0.00000594 USDT | maker"
-        "price=99.00 USDT | quantity=0.00070000 BTC" "Cancel    | order #2 | requested")
+        "price=99.00 USDT | quantity=0.00030000 BTC | notional=0.02970000 USDT | fee=0.00000594 USDT | maker via queue"
+        "price=99.00 USDT | quantity=0.00070000 BTC | notional=0.06930000 USDT | fee=0.00001386 USDT | maker via trade_through"
+        "Cancel    | order #2 | requested"
+        "FILLS   | take 0 | trade_through 1 | book_cross 0 | queue 1 | within 1 s of a data gap 0 | max level share 20.0000%")
     string(FIND "${output}" "${expected}" position)
     if(NOT "${result}" STREQUAL "0" OR position EQUAL -1)
         message(FATAL_ERROR "Limit order journal missing: ${expected}\n${output}\n${error}")
@@ -217,8 +219,39 @@ foreach(expected IN ITEMS ",1,script,buy,limit,9900,0,100000,"
     endif()
 endforeach()
 if(NOT summary MATCHES "maker_fee_ppm,200\n" OR NOT summary MATCHES "fees_quote_atoms,1980\nmaker_fills,2\n"
-        OR NOT summary MATCHES "script_cancels,1\n" OR NOT fills MATCHES ",maker\n")
+        OR NOT summary MATCHES "script_cancels,1\n"
+        OR NOT summary MATCHES "fills_take,0\nfills_trade_through,1\nfills_book_cross,0\nfills_queue,1\n"
+        OR NOT summary MATCHES "fills_near_data_gap,0\nmax_level_share_ppm,200000\n"
+        OR NOT fills MATCHES ",maker,queue,400000,200000,\n" OR NOT fills MATCHES ",maker,trade_through,400000,148936,\n")
     message(FATAL_ERROR "Limit order summary mismatch:\n${summary}\n${fills}")
+endif()
+# Fill diagnostics: trade 12 follows 10, so a market buy right after it is flagged as near
+# a data gap. Markouts compare the 100.00 fill with the first trusted mid at or after
+# +1 s (101.50: +0.0015 USDT for 0.001 BTC) and +10 s (98.50: -0.0015); the session
+# ends before +60 s, so that horizon stays empty.
+set(markout_session "${reports}/markout-market.csv")
+set(markout_config "${reports}/markout.toml")
+file(WRITE "${markout_session}" "tickforge,4,BINANCE_SPOT,BTCUSDT,price_scale=100,quantity_scale=100000000\nsnapshot,1,0,0,0,1,1,1,9900,1000000,10000,1000000\ntrade,2,0,0,500000000,9950,100000,10,buy\ntrade,3,0,0,600000000,9950,100000,12,buy\nsnapshot,4,0,0,1700000000,2,1,1,10100,1000000,10200,1000000\nsnapshot,5,0,0,12000000000,3,1,1,9800,1000000,9900,1000000\nend,5\n")
+file(WRITE "${markout_config}" "version = 1\n[account]\nusdt = \"1000\"\n[execution]\nfee = \"0.1%\"\nquantity_step = \"0.00001\"\nmax_order = \"0.01\"\nmax_position = \"0.01\"\nstale_after = \"5s\"\n[[orders]]\nafter_event = 3\nid = 1\nside = \"buy\"\nquantity = \"0.001\"\nmax_spend = \"1\"\n")
+execute_process(COMMAND "${PROGRAM}" paper "${markout_session}" --config "${markout_config}" --report "${reports}/markout"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+file(READ "${reports}/markout-summary.csv" summary)
+file(READ "${reports}/markout-fills.csv" fills)
+file(READ "${reports}/markout-markouts.csv" markouts)
+foreach(expected IN ITEMS "FILLS   | take 1 | trade_through 0 | book_cross 0 | queue 0 | within 1 s of a data gap 1"
+        "MARKOUT | maker | 1s +0.00000000 USDT over 0 fills | 10s +0.00000000 USDT over 0 fills | 60s +0.00000000 USDT over 0 fills\n"
+        "MARKOUT | taker | 1s +0.00150000 USDT over 1 fills (+1.50 USDT/BTC) | 10s -0.00150000 USDT over 1 fills (-1.50 USDT/BTC) | 60s +0.00000000 USDT over 0 fills\n")
+    string(FIND "${output}" "${expected}" position)
+    if(NOT "${result}" STREQUAL "0" OR position EQUAL -1)
+        message(FATAL_ERROR "Fill diagnostics missing: ${expected}\n${output}\n${error}")
+    endif()
+endforeach()
+if(NOT fills MATCHES ",taker,take,,,0\n" OR NOT markouts MATCHES "\n1,1,buy,taker,10000,100000,600000000,150000,-150000,\n$"
+        OR NOT summary MATCHES "fills_take,1\n" OR NOT summary MATCHES "fills_near_data_gap,1\n"
+        OR NOT summary MATCHES "taker_markout_1s_fills,1\ntaker_markout_1s_quantity_atoms,100000\ntaker_markout_1s_quote_atoms,150000\n"
+        OR NOT summary MATCHES "taker_markout_10s_quote_atoms,-150000\ntaker_markout_60s_fills,0\n"
+        OR NOT summary MATCHES "markouts_file,markout-markouts.csv\n")
+    message(FATAL_ERROR "Fill diagnostics reports mismatch:\n${fills}\n${markouts}\n${summary}")
 endif()
 foreach(case IN ITEMS "orders[0].price: is required|[[orders]]\nafter_event = 1\nid = 1\nside = \"buy\"\ntype = \"limit\"\nquantity = \"0.001\"\n"
         "orders[0].max_spend: applies to market buys only|[[orders]]\nafter_event = 1\nid = 1\nside = \"buy\"\ntype = \"limit\"\nprice = \"1\"\nquantity = \"0.001\"\nmax_spend = \"1\"\n"

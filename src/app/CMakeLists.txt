@@ -1,6 +1,6 @@
 add_executable(tickforge main.cpp cli.hpp cli.cpp commands.hpp replay_command.cpp capture_command.cpp
     paper_command.cpp paper_scenario.hpp paper_scenario.cpp paper_reporter.hpp paper_reporter.cpp
-    paper_export.hpp paper_export.cpp)
+    paper_export.hpp paper_export.cpp paper_diagnostics.hpp paper_diagnostics.cpp)
 target_link_libraries(tickforge PRIVATE tickforge_core tickforge_console tickforge_execution tickforge_accounting tickforge_strategy
     tomlplusplus)
 if(TICKFORGE_ENABLE_LIVE)

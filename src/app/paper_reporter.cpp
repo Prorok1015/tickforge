@@ -106,9 +106,16 @@ void paper_order(const execution::OrderReport& report, bool first)
         balances(report.reserved_balances);
     }
     for (const auto& fill : report.result.fills) {
+        // Maker fills name the evidence: queue, trade_through or book_cross.
+        std::string maker;
+        if (fill.liquidity == Liquidity::maker) {
+            maker = " | maker";
+            for (const auto& note : report.diagnostics)
+                if (note.fill_id == fill.id) maker += std::format(" via {}", execution::source_name(note.source));
+        }
         write_console(std::format("  FILL #{} | price={} USDT | quantity={} BTC | notional={} USDT | fee={} USDT{}\n",
             fill.id, price_text(fill.price_atoms), quantity_text(fill.quantity_atoms), money(fill.quote_atoms),
-            money(fill.fee_quote_atoms), fill.liquidity == Liquidity::maker ? " | maker" : ""));
+            money(fill.fee_quote_atoms), maker));
     }
     if (!report.final) {
         // A resting order: fills so far, nothing released yet.
@@ -152,6 +159,32 @@ void paper_summary(const accounting::Account& account, std::size_t orders, std::
     } else {
         write_console(std::format("  TOTAL   | realized={} USDT | unrealized=unavailable (no trusted bid observed)\n",
             realized));
+    }
+}
+} // namespace tickforge::app
+
+namespace tickforge::app {
+void paper_fill_diagnostics(const FillStats& stats, const Markouts& markouts)
+{
+    const auto count = [&](execution::FillSource source) { return stats.by_source[static_cast<std::size_t>(source)]; };
+    write_console(std::format(
+        "  FILLS   | take {} | trade_through {} | book_cross {} | queue {} | within 1 s of a data gap {} | "
+        "max level share {}.{:04}%\n",
+        count(execution::FillSource::take), count(execution::FillSource::trade_through),
+        count(execution::FillSource::book_cross), count(execution::FillSource::queue), stats.near_gap,
+        stats.max_level_share_ppm / 10000, stats.max_level_share_ppm % 10000));
+    for (const auto liquidity : {Liquidity::maker, Liquidity::taker}) {
+        std::string line = std::format("  MARKOUT | {} |", liquidity == Liquidity::maker ? "maker" : "taker");
+        for (std::size_t h = 0; h < markout_horizons_ns.size(); ++h) {
+            const auto& total = markouts.total(liquidity, h);
+            // The per-BTC average is a display ratio only; the CSV keeps exact atoms.
+            line += std::format(" {}s {} USDT over {} fills{} |", markout_horizons_ns[h] / 1000000000,
+                signed_money(total.quote_atoms), total.fills,
+                total.quantity_atoms == 0 ? std::string()
+                    : std::format(" ({:+.2f} USDT/BTC)", static_cast<double>(total.quote_atoms) / total.quantity_atoms));
+        }
+        line.resize(line.size() - 2);
+        write_console(line + "\n");
     }
 }
 } // namespace tickforge::app
