@@ -218,6 +218,63 @@ void latency()
     rejects([&] { Simulator invalid(settings); });
 }
 
+void risk_limits()
+{
+    // Loss from the session start: reduce-only, buys rejected, sells still allowed.
+    RiskGuard loss({500, 0, 0}, 10000);
+    loss.observe(0, 10000);
+    loss.observe(10, std::nullopt); // no trusted valuation: nothing is judged
+    loss.observe(20, 9501);
+    check(loss.state() == TradingState::normal && loss.buys_allowed(), "a loss below the limit keeps trading");
+    loss.observe(30, 9500);
+    check(loss.state() == TradingState::reduce_only && loss.trigger() == RiskTrigger::max_loss &&
+          loss.triggered_ns() == 30 && loss.trigger_equity() == 9500 && !loss.buys_allowed() && loss.sells_allowed(),
+          "reaching the loss limit switches to reduce-only");
+    check(loss.admit({1, Side::buy, 1, 1}).has_value() && !loss.admit({2, Side::sell, 1, 0}),
+          "reduce-only rejects buys and admits sells");
+    loss.observe(40, 20000);
+    check(loss.state() == TradingState::reduce_only && loss.peak_equity() == 20000, "a recovery does not lift the limit");
+
+    // Drawdown from the peak, not from the start.
+    RiskGuard drawdown({0, 300, 0}, 10000);
+    drawdown.observe(0, 10500);
+    drawdown.observe(1, 10201);
+    check(drawdown.state() == TradingState::normal, "a drawdown below the limit keeps trading");
+    drawdown.observe(2, 10200);
+    check(drawdown.state() == TradingState::reduce_only && drawdown.trigger() == RiskTrigger::max_drawdown &&
+          drawdown.peak_equity() == 10500, "a drawdown from the peak triggers even above the start");
+
+    // Request rate in any 60 s of session time: the request over the limit halts everything.
+    RiskGuard rate({0, 0, 2}, 10000);
+    rate.observe(0, 10000);
+    check(!rate.admit({1, Side::buy, 1, 1}) && !rate.admit({2, Side::buy, 1, 1}), "requests within the rate pass");
+    rate.observe(60000000000, 10000); // the first two requests are now outside the window
+    check(!rate.admit({3, Side::buy, 1, 1}) && !rate.admit({4, Side::buy, 1, 1}), "the window slides with session time");
+    check(rate.admit({5, Side::sell, 1, 0}).has_value() && rate.state() == TradingState::halted &&
+          rate.trigger() == RiskTrigger::order_rate && !rate.sells_allowed(), "a burst halts all trading, sells included");
+    rate.observe(600000000000, 10000);
+    check(rate.admit({6, Side::sell, 1, 0}).has_value(), "a halt is final for the session");
+
+    RiskGuard off({}, 10000);
+    off.observe(0, 1);
+    for (std::int64_t id = 1; id <= 1000; ++id) check(!off.admit({id, Side::buy, 1, 1}), "zero limits are disabled");
+    rejects([] { RiskGuard invalid({-1, 0, 0}, 0); });
+    rejects([&] { off.observe(-1, 1); });
+
+    // OrderManager consults the guard before anything else and records the reason.
+    auto settings = config();
+    Simulator simulator(settings);
+    accounting::Account account(1000000000000, 100000000, 10000000000);
+    RiskGuard guard({1, 0, 0}, 1010000000000);
+    OrderManager manager(account, simulator, settings, &guard);
+    simulator.on_market_event(event(1, BookSnapshot{1, {{9900, 100000000}}, {{10100, 100000000}}}));
+    guard.observe(0, 1009999999999);
+    const auto refused = run(manager, {1, Side::buy, 100000000, 20000000000});
+    check(!refused.accepted && refused.result.reason.starts_with("risk: reduce-only after max_loss") &&
+          account.balances().quote_reserved == 0, "a blocked buy is rejected without reserving funds");
+    check(run(manager, {2, Side::sell, 100000000, 0}).result.status == OrderStatus::filled, "closing is still possible");
+}
+
 // Test executions answer each submitted order with a scripted result.
 class ScriptedExecution : public Execution {
 public:
@@ -288,7 +345,7 @@ int main()
 {
     try {
         routing_and_liquidity(); budget_and_rounding(); risk_and_freshness(); partial_sell(); uncertain_results();
-        latency();
+        latency(); risk_limits();
         std::fputs("Execution, risk, and liquidity checks passed\n", stdout);
         return 0;
     } catch (const std::exception& error) {

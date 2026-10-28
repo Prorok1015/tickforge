@@ -44,7 +44,8 @@ Do not depend on live APIs in tests.
    and a console journal. An offline strategy interface and threshold example now
    generate requests through the same path. See [paper trading](paper-trading.md)
    and [strategies](strategies.md). Average cost basis with realized/unrealized PnL
-   is implemented. Daily-loss limits and machine-readable journal export remain planned.
+   is implemented, as are session loss/drawdown limits, an order-rate halt, and
+   machine-readable reports.
 6. **Reproducible Linux delivery:** CI, synthetic end-to-end example, then profiling.
 
 The remaining parts of step 5 and step 6 are planned. Each step should finish with relevant tests and updated

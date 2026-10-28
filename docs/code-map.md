@@ -214,8 +214,10 @@ unrealized/total PnL, equity, and average cost. They are pure functions of the l
 `take_reports` with execution and report times) and explicit paper settings.
 `simulator.hpp/.cpp` consumes replay events, guards book freshness, delays execution
 and reports by the configured latencies, and simulates fills using separate virtual
-liquidity counters. `order_manager.hpp/.cpp` performs
-risk checks, reserves funds, and submits; `collect()` later validates confirmed
+liquidity counters. `risk.hpp/.cpp` (`RiskGuard`) tracks equity against loss,
+drawdown, and order-rate limits and escalates normal -> reduce-only -> halted.
+`order_manager.hpp/.cpp` asks the guard first, then performs order checks,
+reserves funds, and submits; `collect()` later validates confirmed
 results and commits them to the account.
 
 The app's `paper_command.cpp` connects these pieces; `paper_scenario.*` reads the

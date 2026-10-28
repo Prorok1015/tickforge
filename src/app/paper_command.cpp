@@ -4,6 +4,7 @@
 #include "paper_export.hpp"
 #include <tickforge/core/replay.hpp>
 #include <tickforge/core/amounts.hpp>
+#include <tickforge/accounting/valuation.hpp>
 #include <tickforge/execution/simulator.hpp>
 #include <tickforge/console/console.hpp>
 #include <format>
@@ -41,7 +42,9 @@ void paper_session(const PaperOptions& options)
     if (!input) throw std::runtime_error(std::format("cannot open session '{}'", session_path));
     accounting::Account account(scenario.initial_quote_atoms, scenario.initial_base_atoms, scenario.initial_base_cost_atoms);
     execution::Simulator simulator(scenario.config);
-    execution::OrderManager manager(account, simulator, scenario.config);
+    // Initial equity matches the PnL definition: starting USDT plus the declared BTC cost.
+    execution::RiskGuard risk(scenario.risk, amount_add(scenario.initial_quote_atoms, scenario.initial_base_cost_atoms));
+    execution::OrderManager manager(account, simulator, scenario.config, &risk);
     PaperTotals totals;
     std::size_t next = 0;
     std::optional<Mark> mark;
@@ -78,9 +81,23 @@ void paper_session(const PaperOptions& options)
             in_flight.erase(found);
         }
     };
+    // Prints a risk state change once and remembers when it happened for the report.
+    const auto note_risk = [&](const EventTime& time) {
+        if (risk.state() == totals.risk_state) return;
+        totals.risk_state = risk.state();
+        totals.risk_event = time.ordinal;
+        write_console(std::format("Risk      | event #{} | {} after {} | equity={} USDT | start={} USDT | peak={} USDT\n",
+            time.ordinal, risk.state() == execution::TradingState::halted ? "HALTED: no orders" : "REDUCE-ONLY: sells only",
+            execution::trigger_name(risk.trigger()),
+            risk.trigger_equity() ? money_text(*risk.trigger_equity()) : std::string("unknown"),
+            money_text(amount_add(scenario.initial_quote_atoms, scenario.initial_base_cost_atoms)),
+            money_text(risk.peak_equity())));
+    };
     const auto submit = [&](const MarketEvent& event, const MarketOrder& order, std::string_view signal) {
         ++totals.requests;
-        if (const auto rejected = manager.submit(order)) {
+        const auto rejected = manager.submit(order);
+        note_risk(event.time);
+        if (rejected) {
             record(*rejected, event.time, signal);
         } else {
             in_flight.emplace(order.id, std::pair{event.time, signal});
@@ -98,10 +115,17 @@ void paper_session(const PaperOptions& options)
         // Recordings end with a shutdown reset, so keep the last trusted bid for valuation.
         if (const auto bid = simulator.book().best_bid(); bid && simulator.available())
             mark = Mark{bid->price_atoms, event.time.ordinal};
+        // Risk is judged only on a trusted current valuation; a flat account needs no price.
+        std::optional<std::int64_t> equity;
+        if (account.balances().base_total == 0) equity = account.balances().quote_total;
+        else if (simulator.available() && mark && mark->ordinal == event.time.ordinal)
+            equity = accounting::value_at(account, mark->price_atoms).equity_quote;
+        risk.observe(event.time.receive_elapsed_ns, equity);
+        note_risk(event.time);
         if (algorithm) {
             const auto order = algorithm->on_market({event.time, simulator.available(),
                 simulator.executable_level(Side::sell), simulator.executable_level(Side::buy),
-                account.balances(), account.position()});
+                account.balances(), account.position(), risk.buys_allowed(), risk.sells_allowed()});
             if (const auto until = algorithm->started_cooldown_until())
                 write_console(std::format("Cooldown  | event #{} | stop-loss closed the position; no buys until elapsed={} ns\n",
                     event.time.ordinal, *until));
@@ -126,7 +150,7 @@ void paper_session(const PaperOptions& options)
     if (manager.in_flight() != 0) throw std::runtime_error("orders remain unresolved after the session");
     paper_summary(account, totals.requests, totals.rejected, totals.fills, totals.fees, mark);
     if (exporter) {
-        exporter->complete(automatic ? "strategy" : "paper", session_path, scenario_path, scenario, account, totals, mark);
+        exporter->complete(automatic ? "strategy" : "paper", session_path, scenario_path, scenario, account, totals, mark, risk);
         write_console(std::format("Report    | {}\n", exporter->summary_path()));
     }
 }

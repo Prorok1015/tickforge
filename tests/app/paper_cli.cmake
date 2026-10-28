@@ -143,7 +143,7 @@ foreach(expected IN ITEMS
         message(FATAL_ERROR "Order journal missing: ${expected}\n${orders}\n${error}")
     endif()
 endforeach()
-foreach(expected IN ITEMS "version,3\n" "command,paper\n" "config,\"${comma_config}\"\n"
+foreach(expected IN ITEMS "version,4\n" "command,paper\n" "config,\"${comma_config}\"\n"
         "overrides,execution.stale_after=5s\n" "fee_ppm,1000\n" "stale_after_ns,5000000000\n"
         "strategy,script\n" "script_orders,8\n"
         "requests,8\nrejected,1\nfills,8\nfees_quote_atoms,78001350\n" "realized_pnl_quote_atoms,-39757401\n"
@@ -171,6 +171,22 @@ execute_process(COMMAND "${PROGRAM}" paper "${incomplete}" --config "${scratch}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT "${result}" STREQUAL "1" OR NOT EXISTS "${reports}/failed-orders.csv" OR EXISTS "${reports}/failed-summary.csv")
     message(FATAL_ERROR "A failed run must not write a summary")
+endif()
+# Order-rate kill switch: three requests arrive at event #1, the limit is two per minute,
+# so the third halts trading; every later request is refused, sells included.
+execute_process(COMMAND "${PROGRAM}" paper "${SESSION}" --config "${SCENARIO}" --report "${reports}/halt"
+    --set risk.max_orders_per_minute=2
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+file(READ "${reports}/halt-summary.csv" summary)
+foreach(expected IN ITEMS "Risk      | event #1 | HALTED: no orders after order_rate"
+        "risk: trading halted (order_rate)" "Paper complete | 8 requests | 6 rejected | 2 fills")
+    string(FIND "${output}" "${expected}" position)
+    if(NOT "${result}" STREQUAL "0" OR position EQUAL -1)
+        message(FATAL_ERROR "Order-rate halt missing: ${expected}\n${output}\n${error}")
+    endif()
+endforeach()
+if(NOT summary MATCHES "max_orders_per_minute,2\n" OR NOT summary MATCHES "risk_state,halted\nrisk_trigger,order_rate\nrisk_event_ordinal,1\n")
+    message(FATAL_ERROR "Halt must be recorded in the summary: ${summary}")
 endif()
 file(REMOVE_RECURSE "${reports}")
 file(REMOVE "${scratch}" "${incomplete}")

@@ -133,6 +133,11 @@ stale_after = "5s"
 order_latency = "0s"   # optional, see Latency
 report_latency = "0s"  # optional
 
+[risk]                 # optional; every limit defaults to off
+max_loss = "5"         # USDT below the starting equity -> reduce-only
+max_drawdown = "3"     # USDT below the session's peak equity -> reduce-only
+max_orders_per_minute = 20  # more requests in any 60 s -> halt
+
 [[orders]]             # repeated; or a [strategy] table, never both
 after_event = 1        # send right after this market event ordinal
 id = 1
@@ -242,7 +247,7 @@ execution report. With zero latency both occur within the event that submitted t
 order; with latency they are separated in session time (see below).
 
 No shorts, leverage, limit orders, resting orders, cancellation requests, or
-daily-loss limits are implemented. A fresh sequence is not enough on its own: depth is
+calendar-day loss resets are implemented. A fresh sequence is not enough on its own: depth is
 stale once the current replay offset exceeds the last valid depth observation by
 `stale_after_ns`. Trades and stale duplicate ranges do not refresh this observation.
 Gap/disconnect states and unbridged live snapshots block execution.
@@ -258,6 +263,45 @@ reservation and aborts the run. It must not assume that an uncertain request was
 rejected. A confirmed rejection, in contrast, releases the reservation. Recovering
 such an uncertain state through exchange reconciliation is a future real-execution
 task; no real adapter is supplied by this stage.
+
+## Risk limits
+
+Strategy rules (stop-loss, cooldown, break-even selling) protect a strategy from its
+own market view. The account-level `RiskGuard` protects the account from any
+strategy, including a broken one. It sits in front of `OrderManager`, counts and
+checks every request, and does not trust the strategy to obey.
+
+| Limit | Measured as | Effect |
+| --- | --- | --- |
+| `max_loss` | starting equity minus current equity | **reduce-only** |
+| `max_drawdown` | session peak equity minus current equity | **reduce-only** |
+| `max_orders_per_minute` | requests in any 60 s of session time | **halted** |
+
+- **Equity**, not realized PnL: USDT total plus BTC at the current trusted bid. A
+  strategy that never sells below cost never realizes a loss, so a realized-only limit
+  would stay blind exactly when the account loses value. Starting equity is the
+  starting USDT plus the declared cost of starting BTC, as for PnL.
+- Equity is judged only when the book is trusted at that event (or the account holds
+  no BTC). During gaps the last state simply stays.
+- **Reduce-only** rejects buys and still admits sells, so a losing position can be
+  closed. Blocking everything would force the account to keep a falling position.
+- **Halted** rejects everything. A burst of requests signals a malfunction rather than
+  a market move, so even sells stop.
+- States only escalate within a session (normal -> reduce-only -> halted); a limit
+  that releases itself is not a limit. A new run starts fresh. Orders already in
+  flight are not recalled: a submitted market order cannot be withdrawn.
+- The strategy view carries `buys_allowed` and `sells_allowed`, so the threshold
+  strategy stops proposing what would be refused. Refusals that still happen are
+  journaled with a `risk:` reason.
+
+The journal prints `Risk | event #N | REDUCE-ONLY ...` or `HALTED ...` with the
+equity, start, and peak. The summary records the limits, the final `risk_state`, the
+`risk_trigger`, its event and time, the equity then, and the peak equity.
+
+A "day" is the session for now: recordings are at most an hour long. Calendar-day
+resets matter only for multi-day runs and are not implemented. A manual kill switch
+has no use in replay, where no one can press it mid-run; automatic triggers cover
+that role here.
 
 ## Latency
 

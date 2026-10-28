@@ -1,5 +1,6 @@
 #pragma once
 #include <tickforge/execution/execution.hpp>
+#include <tickforge/execution/risk.hpp>
 #include <tickforge/strategy/threshold.hpp>
 #include <optional>
 #include <string>
@@ -15,6 +16,7 @@ struct PaperScenario {
     std::int64_t initial_base_atoms;
     std::int64_t initial_base_cost_atoms;
     execution::PaperConfig config;
+    execution::RiskLimits risk;         // [risk]; all limits off when absent
     std::vector<ScriptOrder> orders;
     std::optional<strategy::ThresholdConfig> strategy;
     std::vector<std::string> overrides; // "key=value" as given, applied before validation

@@ -5,8 +5,8 @@
 
 namespace tickforge::execution {
 
-OrderManager::OrderManager(accounting::Account& account, Execution& execution, PaperConfig config)
-    : account_(account), execution_(execution), config_(config) { validate_config(config); }
+OrderManager::OrderManager(accounting::Account& account, Execution& execution, PaperConfig config, RiskGuard* risk)
+    : account_(account), execution_(execution), config_(config), risk_(risk) { validate_config(config); }
 
 std::optional<OrderReport> OrderManager::submit(const MarketOrder& order)
 {
@@ -15,6 +15,9 @@ std::optional<OrderReport> OrderManager::submit(const MarketOrder& order)
             account_.balances(), account_.balances(), account_.position()};
     };
     if (order.id <= 0 || !submitted_.insert(order.id).second) return reject("invalid or duplicate order ID");
+    // The guard does not trust the strategy: every request is counted and checked.
+    if (risk_)
+        if (auto reason = risk_->admit(order)) return reject(std::move(*reason));
     if (order.quantity_atoms <= 0 || order.quantity_atoms % config_.quantity_step_atoms != 0 ||
         (order.side != Side::buy && order.side != Side::sell) ||
         (order.side == Side::buy && order.max_spend_quote_atoms <= 0) ||

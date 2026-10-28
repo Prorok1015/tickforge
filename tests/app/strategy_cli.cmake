@@ -60,6 +60,20 @@ if(NOT "${result}" STREQUAL "0" OR cooldown EQUAL -1 OR output MATCHES "event #3
         OR NOT output MATCHES "Paper complete \\| 2 requests")
     message(FATAL_ERROR "Cooldown must block the rebuy after a stop-loss: ${output} ${error}")
 endif()
+# Loss limit: at event #2 equity is 99.8999 USDT + 0.001 BTC at 98.00 = 99.9979 USDT,
+# 0.0021 below the start, so reduce-only begins. The stop-loss sell is still allowed,
+# and the immediate rebuy at event #3 is blocked by the account, not by a cooldown.
+execute_process(COMMAND "${PROGRAM}" strategy "${falling}" --config "${SCENARIO}"
+    --set strategy.stop_loss=1% --set risk.max_loss=0.002
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+foreach(expected IN ITEMS "Risk      | max loss=0.00200000 USDT | max drawdown=off"
+        "Risk      | event #2 | REDUCE-ONLY: sells only after max_loss | equity=99.99790000 USDT | start=100.00000000 USDT"
+        "Signal    | event #2 | STOP-LOSS" "Paper complete | 2 requests | 0 rejected | 2 fills")
+    string(FIND "${output}" "${expected}" position)
+    if(NOT "${result}" STREQUAL "0" OR position EQUAL -1 OR output MATCHES "event #3 \\| BUY")
+        message(FATAL_ERROR "Loss limit behaviour missing: ${expected}\n${output}\n${error}")
+    endif()
+endforeach()
 file(REMOVE "${falling}")
 
 # Invalid strategy values are rejected naming the key.

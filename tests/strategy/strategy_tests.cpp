@@ -114,6 +114,17 @@ int main()
         threw = false;
         try { strategy::Threshold bad({10000, 10200, 1000, 1, 1000, 1000, 0, 1}); } catch (const std::runtime_error&) { threw = true; }
         check(threw); // A cooldown without a stop-loss would silently do nothing.
+
+        // Account risk state: reduce-only blocks buys but keeps exits; a halt blocks both.
+        strategy::Threshold restricted(cool_config);
+        strategy::View risky{{1, 0, 0, 0}, true, Level{9800, 1000000}, Level{9900, 1000000},
+            {10000000000, 0, 0, 0}, {}, false, true};
+        check(!restricted.on_market(risky)); // Buy condition holds, but buys are not allowed.
+        risky.time.ordinal = 2; risky.balances = {0, 0, 200000, 0}; risky.position = {20400000, 0};
+        risky.bid = Level{10098, 1000000}; risky.ask = Level{10099, 1000000};
+        check(restricted.on_market(risky) && restricted.last_signal() == strategy::Signal::stop_loss);
+        risky.time.ordinal = 3; risky.sells_allowed = false;
+        check(!restricted.on_market(risky)); // Halted: not even a stop-loss is proposed.
         return 0;
     } catch (const std::exception& error) { std::fprintf(stderr, "%s\n", error.what()); return 1; }
 }

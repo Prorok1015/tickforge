@@ -1,5 +1,6 @@
 #pragma once
 #include <tickforge/execution/execution.hpp>
+#include <tickforge/execution/risk.hpp>
 #include <tickforge/accounting/account.hpp>
 #include <map>
 #include <optional>
@@ -24,7 +25,8 @@ struct OrderReport {
 // confirmed result is committed to the account later, when collect() receives it.
 class OrderManager {
 public:
-    OrderManager(accounting::Account& account, Execution& execution, PaperConfig config);
+    // An optional risk guard is consulted for every request before other checks.
+    OrderManager(accounting::Account& account, Execution& execution, PaperConfig config, RiskGuard* risk = nullptr);
     // Returns the final report of a request rejected before execution; nullopt once
     // accepted, in which case its report comes from a later collect().
     std::optional<OrderReport> submit(const MarketOrder& order);
@@ -37,6 +39,7 @@ private:
     accounting::Account& account_;
     Execution& execution_;
     PaperConfig config_;
+    RiskGuard* risk_;
     std::set<std::int64_t> submitted_;
     std::map<std::int64_t, Pending> pending_;
 };

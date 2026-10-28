@@ -99,7 +99,7 @@ void PaperExport::order(const EventTime& submitted, std::string_view signal, con
 
 void PaperExport::complete(std::string_view command, std::string_view session, std::string_view scenario_path,
                            const PaperScenario& scenario, const accounting::Account& account,
-                           const PaperTotals& totals, std::optional<Mark> mark)
+                           const PaperTotals& totals, std::optional<Mark> mark, const execution::RiskGuard& risk)
 {
     // The journals must be on disk before the summary claims completion.
     for (auto* file : {&orders_, &fills_})
@@ -108,7 +108,7 @@ void PaperExport::complete(std::string_view command, std::string_view session, s
     std::vector<std::pair<std::string, std::string>> rows;
     const auto add = [&](std::string key, auto value) { rows.emplace_back(std::move(key), std::format("{}", value)); };
     add("format", "tickforge-paper-summary");
-    add("version", 3);
+    add("version", 4);
     add("command", command);
     add("session", csv(session));
     add("config", csv(scenario_path));
@@ -128,6 +128,9 @@ void PaperExport::complete(std::string_view command, std::string_view session, s
     add("stale_after_ns", scenario.config.stale_after_ns);
     add("order_latency_ns", scenario.config.order_latency_ns);
     add("report_latency_ns", scenario.config.report_latency_ns);
+    add("max_loss_quote_atoms", scenario.risk.max_loss_quote);
+    add("max_drawdown_quote_atoms", scenario.risk.max_drawdown_quote);
+    add("max_orders_per_minute", scenario.risk.max_orders_per_minute);
     if (const auto& s = scenario.strategy) {
         add("strategy", "threshold");
         add("buy_price_atoms", s->buy_price_atoms);
@@ -166,6 +169,14 @@ void PaperExport::complete(std::string_view command, std::string_view session, s
     rows.emplace_back("unrealized_pnl_quote_atoms", field(&accounting::Valuation::unrealized_pnl_quote, 0));
     rows.emplace_back("total_pnl_quote_atoms", field(&accounting::Valuation::total_pnl_quote, position.realized_pnl_quote));
     rows.emplace_back("equity_quote_atoms", field(&accounting::Valuation::equity_quote, balances.quote_total));
+    const auto optional = [](std::optional<std::int64_t> value) { return value ? std::format("{}", *value) : std::string(); };
+    add("risk_state", risk.state() == execution::TradingState::normal ? "normal"
+        : risk.state() == execution::TradingState::reduce_only ? "reduce_only" : "halted");
+    add("risk_trigger", execution::trigger_name(risk.trigger()));
+    rows.emplace_back("risk_event_ordinal", optional(totals.risk_event));
+    rows.emplace_back("risk_triggered_ns", optional(risk.triggered_ns()));
+    rows.emplace_back("risk_trigger_equity_quote_atoms", optional(risk.trigger_equity()));
+    add("peak_equity_quote_atoms", risk.peak_equity());
     add("orders_file", csv(std::filesystem::path(orders_path_).filename().string()));
     add("fills_file", csv(std::filesystem::path(fills_path_).filename().string()));
     add("status", "complete");

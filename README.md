@@ -140,8 +140,9 @@ Checked items below are implemented; unchecked items remain planned.
 - [ ] Add limit orders, partial fills, and queue assumptions.
 - [ ] Compare results under different execution assumptions.
 - [x] Block decisions on stale or invalid depth.
-- [ ] Add an emergency trading stop.
-- [ ] Add a daily-loss limit based on realized and unrealized PnL.
+- [x] Add an automatic trading stop (order-rate halt).
+- [x] Add session loss and drawdown limits based on equity (reduce-only).
+- [ ] Reset loss limits per calendar day for multi-day runs.
 - [ ] Persist ledger state and open orders; restore them after a restart.
 
 The asynchronous lifecycle, risk stops, and persistence are simulation features in

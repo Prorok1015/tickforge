@@ -127,7 +127,7 @@ PaperScenario load_paper_scenario(std::string_view path, const std::vector<std::
 
     PaperScenario result{};
     result.overrides = overrides;
-    const Section top(root, "", {"version", "account", "execution", "strategy", "orders"});
+    const Section top(root, "", {"version", "account", "execution", "risk", "strategy", "orders"});
     if (top.get("version", whole) != 1) fail("version", "only version 1 is supported");
 
     const auto* account_table = subtable(root, "account");
@@ -156,6 +156,13 @@ PaperScenario load_paper_scenario(std::string_view path, const std::vector<std::
         execution::validate_config(result.config);
     } catch (const std::invalid_argument&) {
         fail("execution", "fee must be at most 100% and the step and limits must be positive");
+    }
+
+    if (const auto* risk_table = subtable(root, "risk")) {
+        const Section risk(*risk_table, "risk.", {"max_loss", "max_drawdown", "max_orders_per_minute"});
+        result.risk.max_loss_quote = risk.get_or("max_loss", parse_quote, "0");
+        result.risk.max_drawdown_quote = risk.get_or("max_drawdown", parse_quote, "0");
+        result.risk.max_orders_per_minute = risk.get_or("max_orders_per_minute", whole, "0");
     }
 
     const auto* strategy_table = subtable(root, "strategy");

@@ -38,7 +38,10 @@ flowchart LR
 For each event the app first updates the simulator, then builds a value snapshot
 of current bid/ask, availability, event time, confirmed balances, and the position
 (cost basis and realized PnL). Bid/ask are the best levels still executable for
-this account: recorded size minus liquidity consumed by earlier virtual orders. It invokes
+this account: recorded size minus liquidity consumed by earlier virtual orders. The view
+also carries the account risk state (`buys_allowed`, `sells_allowed`, see
+[risk limits](paper-trading.md#risk-limits)); the threshold policy proposes no buy in
+reduce-only and nothing when halted. It invokes
 `Strategy::on_market` once and submits at most one proposed market order through
 the existing risk/reservation/execution path. It prints the triggering event and
 side before the request, fills, fees, and resulting balances. The next decision

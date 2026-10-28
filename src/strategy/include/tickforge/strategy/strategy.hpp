@@ -14,6 +14,9 @@ struct View {
     std::optional<Level> ask;
     accounting::Balances balances;
     accounting::Position position;
+    // Account risk state: after a loss limit only sells are accepted; after a halt nothing.
+    bool buys_allowed = true;
+    bool sells_allowed = true;
 };
 
 class Strategy {

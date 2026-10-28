@@ -42,6 +42,21 @@ void balances(const accounting::Balances& balance)
 }
 }
 
+std::string money_text(std::int64_t atoms) { return money(atoms); }
+
+namespace {
+std::string risk_text(const execution::RiskLimits& limits)
+{
+    const auto limit = [](std::int64_t value, std::string_view unit) {
+        return value == 0 ? std::string("off") : std::format("{} {}", value, unit);
+    };
+    return std::format("max loss={} | max drawdown={} | max orders/minute={} (losses: sells only; rate: halt)",
+        limits.max_loss_quote == 0 ? std::string("off") : money(limits.max_loss_quote) + " USDT",
+        limits.max_drawdown_quote == 0 ? std::string("off") : money(limits.max_drawdown_quote) + " USDT",
+        limit(limits.max_orders_per_minute, "requests"));
+}
+} // namespace
+
 std::string overrides_text(const std::vector<std::string>& overrides)
 {
     if (overrides.empty()) return "none";
@@ -60,11 +75,12 @@ void paper_header(std::string_view session, std::string_view scenario, const Pap
         "Fee       | {} ppm in USDT (configured assumption, not a live venue fee)\n"
         "Limits    | order={} BTC | position={} BTC | quantity step={} BTC | stale after={} ns\n"
         "Liquidity | consumed virtually; only explicit level updates or snapshots replenish it\n"
+        "Risk      | {}\n"
         "Initial   | {} USDT | {} BTC | BTC cost basis={} USDT\n"
         "PnL       | average cost; buy fees in cost, sell fees in proceeds; marked at last trusted bid\n\n",
         session, scenario, overrides_text(settings.overrides), settings.config.order_latency_ns, settings.config.report_latency_ns, settings.config.fee_ppm,
         quantity_text(settings.config.max_order_quantity_atoms), quantity_text(settings.config.max_position_quantity_atoms),
-        quantity_text(settings.config.quantity_step_atoms), settings.config.stale_after_ns,
+        quantity_text(settings.config.quantity_step_atoms), settings.config.stale_after_ns, risk_text(settings.risk),
         money(settings.initial_quote_atoms), quantity_text(settings.initial_base_atoms),
         money(settings.initial_base_cost_atoms)));
 }

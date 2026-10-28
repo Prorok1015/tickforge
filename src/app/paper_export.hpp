@@ -15,6 +15,8 @@ struct PaperTotals {
     std::int64_t fees = 0;
     std::size_t cancelled_no_book = 0; // accepted, but no trusted book at execution time
     std::size_t cancelled_at_end = 0;  // accepted, but market data ended first
+    execution::TradingState risk_state = execution::TradingState::normal;
+    std::optional<std::int64_t> risk_event; // ordinal of the event that changed the risk state
 };
 
 // Machine-readable experiment output in integer atoms. <prefix>-orders.csv and
@@ -27,7 +29,7 @@ public:
     void order(const EventTime& submitted, std::string_view signal, const execution::OrderReport& report);
     void complete(std::string_view command, std::string_view session, std::string_view scenario_path,
                   const PaperScenario& scenario, const accounting::Account& account,
-                  const PaperTotals& totals, std::optional<Mark> mark);
+                  const PaperTotals& totals, std::optional<Mark> mark, const execution::RiskGuard& risk);
     const std::string& summary_path() const { return summary_path_; }
 private:
     struct Close { void operator()(std::FILE* file) const { std::fclose(file); } };
