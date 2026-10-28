@@ -158,6 +158,9 @@ the simulator should exercise them first.
 - [ ] Add a forward paper mode: the live public feed with simulated execution and
   virtual funds, no keys.
 - [ ] Record the live session alongside forward trading so the run can be replayed.
+- [ ] Run several strategies on one account: per-strategy sub-ledgers (position, cost,
+  PnL) with fills tagged by strategy, per-strategy and account risk limits, capital
+  allocation, and self-trade prevention. Until then a run has exactly one strategy.
 
 Paper, forward, testnet, and live runs differ only at the edges: where events come
 from and where orders go. The loop between them must be one shared implementation so
