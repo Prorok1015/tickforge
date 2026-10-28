@@ -1,0 +1,25 @@
+# Mean reversion: no absolute prices. The strategy watches the market for `window`,
+# then buys dips below its moving average and sells above its own purchase price.
+# Decimals are strings: TOML floats are binary approximations, money is exact.
+version = 1
+
+[account]
+usdt = "100"
+
+[execution]
+fee = "0.1%"
+quantity_step = "0.00001"
+max_order = "0.01"
+max_position = "0.01"
+stale_after = "5s"
+
+[strategy]
+type = "mean_reversion"
+window = "10min"        # average of the mid price over this much recent time; also the warm-up
+entry_below = "0.15%"   # buy when the best ask is this far below the average
+take_profit = "0.3%"    # sell when the bid is this far above the purchase price, never at a loss
+quantity = "0.001"      # BTC per request
+buy_budget = "90"       # USDT per buy, including fees
+stop_loss = "0.5%"      # sell at market once the position is this far below cost; 0% = off
+cooldown = "60s"        # no buys for this long after a stop-loss exit; requires a stop-loss
+max_gap = "10s"         # a longer stretch without usable prices restarts the warm-up

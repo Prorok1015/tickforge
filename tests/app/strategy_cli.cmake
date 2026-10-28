@@ -188,4 +188,33 @@ if(NOT summary MATCHES "strategy,threshold_maker\n" OR NOT summary MATCHES "make
         OR NOT summary MATCHES "fills_queue,2\n" OR NOT output MATCHES "maker via queue")
     message(FATAL_ERROR "Maker summary mismatch: ${summary}")
 endif()
+# mean_reversion on prices only it has seen: a 3 s warm-up, then a dip 1% below the
+# average buys at 95.00 and the bounce sells at 97.00 (above cost + 1%). Its config holds
+# no absolute price, so threshold keys are rejected.
+set(relative_market "${reports}/relative-market.csv")
+set(relative_config "${reports}/relative.toml")
+file(WRITE "${relative_market}" "tickforge,4,BINANCE_SPOT,BTCUSDT,price_scale=100,quantity_scale=100000000\nsnapshot,1,0,0,0,1,1,1,9999,100000000,10001,100000000\nsnapshot,2,0,0,1000000000,2,1,1,9999,100000000,10001,100000000\nsnapshot,3,0,0,2500000000,3,1,1,9999,100000000,10001,100000000\nsnapshot,4,0,0,3000000000,4,1,1,9498,100000000,9500,100000000\nsnapshot,5,0,0,3500000000,5,1,1,9700,100000000,9702,100000000\nend,5\n")
+file(WRITE "${relative_config}" "version = 1\n[account]\nusdt = \"1000\"\n[execution]\nfee = \"0.1%\"\nquantity_step = \"0.00001\"\nmax_order = \"0.01\"\nmax_position = \"0.01\"\nstale_after = \"5s\"\n[strategy]\ntype = \"mean_reversion\"\nwindow = \"3s\"\nentry_below = \"1%\"\ntake_profit = \"1%\"\nquantity = \"0.001\"\nbuy_budget = \"1\"\n")
+execute_process(COMMAND "${PROGRAM}" strategy "${relative_market}" --config "${relative_config}" --report "${reports}/relative"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+file(READ "${reports}/relative-summary.csv" summary)
+foreach(expected IN ITEMS "Strategy  | mean_reversion | buy when the ask is 1.00% below the 3 s average"
+        "Notice    | event #3 | warm-up complete: average 100.00, buying at <= 99.00"
+        "Signal    | event #4 | BUY ask threshold reached" "price=95.00 USDT | quantity=0.00100000 BTC"
+        "Signal    | event #5 | SELL bid threshold reached" "price=97.00 USDT | quantity=0.00100000 BTC"
+        "realized=+0.00180800 USDT")
+    string(FIND "${output}" "${expected}" position)
+    if(NOT "${result}" STREQUAL "0" OR position EQUAL -1)
+        message(FATAL_ERROR "Mean reversion missing: ${expected}\n${output}\n${error}")
+    endif()
+endforeach()
+if(NOT summary MATCHES "strategy,mean_reversion\nwindow_ns,3000000000\nentry_below_ppm,10000\ntake_profit_ppm,10000\n"
+        OR NOT summary MATCHES "max_gap_ns,10000000000\n")
+    message(FATAL_ERROR "Mean reversion summary mismatch: ${summary}")
+endif()
+execute_process(COMMAND "${PROGRAM}" strategy "${relative_market}" --config "${relative_config}"
+    --set strategy.buy_below=100 RESULT_VARIABLE result OUTPUT_QUIET ERROR_VARIABLE error)
+if(NOT "${result}" STREQUAL "1" OR NOT error MATCHES "strategy.buy_below: unknown key")
+    message(FATAL_ERROR "mean_reversion must reject absolute thresholds: ${result} ${error}")
+endif()
 file(REMOVE_RECURSE "${reports}")

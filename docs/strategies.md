@@ -60,7 +60,8 @@ partial fills, resting orders, or rejected requests.
 console, socket, or simulator dependency. `rules.hpp/.cpp` holds the rules both
 policies share: break-even selling with ledger-identical rounding, the stop-loss
 trigger, the post-stop cooldown, and the usable-quote check. `threshold.*` implements
-the market-order policy and `threshold_maker.*` the limit-order policy. `tickforge_strategy` has its own directory and CMake
+the market-order policy, `threshold_maker.*` the limit-order policy, and
+`mean_reversion.*` the policy relative to a moving average. `tickforge_strategy` has its own directory and CMake
 target and depends only on core types and accounting balances. The application
 assembles these components; changing a strategy does not change the ledger.
 
@@ -88,6 +89,53 @@ less often and at worse moments (adverse selection) than its prices suggest.
 
 Both policies read the account's balances and position, so a run must have exactly one
 strategy. Strategy-owned sub-ledgers are planned with multi-strategy accounts.
+
+## Relative policy: `mean_reversion`
+
+The threshold policies need absolute prices in the config. Choosing them is manual
+fitting to one session, and they do not carry over: a price range that suited one hour
+may never be reached in the next. `mean_reversion` has no absolute price at all; it
+learns its reference from the market while it runs (`examples/mean-reversion.toml`):
+
+```toml
+[strategy]
+type = "mean_reversion"
+window = "10min"        # average of the mid price over this much recent time; also the warm-up
+entry_below = "0.15%"   # buy when the best ask is this far below the average
+take_profit = "0.3%"    # sell when the bid is this far above the purchase price, never at a loss
+quantity = "0.001"
+buy_budget = "90"
+stop_loss = "0.5%"      # optional, default 0% (off)
+cooldown = "60s"        # optional, default 0s; requires a stop-loss
+max_gap = "10s"         # optional, default 10s
+```
+
+- **Reference.** Once per second of session time the policy samples the mid price
+  `(bid + ask) / 2`; the reference is the average of the last `window` of samples.
+  Sampling by time, not per event, keeps a burst of a thousand updates from outweighing
+  a quiet minute. A second without any event repeats the last mid, because no event
+  means an unchanged book. The current price joins the average before the decision, so
+  a sudden drop must exceed `entry_below` against an average that already includes it.
+- **Warm-up.** Until the window is full it only watches: no buys. A stretch longer than
+  `max_gap` without a usable quote (no trusted book, a reconnect) clears the history,
+  and the warm-up starts again, because the old average may no longer describe the
+  market. Shorter gaps repeat the last mid.
+- **Entry.** Flat, warm, and not in a cooldown: a market buy when the best ask is at
+  least `entry_below` below the average. This is mean reversion: a price that moved
+  away from its recent average is expected to come back. Note that a price *below the
+  window's minimum* would mean the opposite to most traders: a breakdown that often
+  continues.
+- **Exit.** The same rules as `threshold`, relative to the purchase instead of a fixed
+  price: the stop-loss first, otherwise a market sale once the bid is `take_profit`
+  above the average cost (fees included) and the sale covers the cost after its fee.
+  Exits do not need the average, so they continue through a warm-up.
+- **Weakness.** In a long trend down, the average follows the price down, and the
+  policy keeps finding "dips" while the position does not recover. The stop-loss and
+  the cooldown are its protection.
+
+Window, entry, and take-profit are still parameters someone chooses. Unlike absolute
+prices they transfer between sessions, which makes them worth searching offline on
+recordings and checking on other recordings.
 
 ## Configuration
 

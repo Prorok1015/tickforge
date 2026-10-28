@@ -129,6 +129,10 @@ Checked items below are implemented; unchecked items remain planned.
 - [x] Add position and order-size limits.
 - [x] Print an operation journal and final account summary.
 - [x] Export a machine-readable trade journal and session summary.
+- [x] Add a strategy without absolute prices: `mean_reversion` learns a moving average
+  during a warm-up and trades relative to it and to its own purchase price.
+- [ ] Search strategy parameters offline: a grid of `--set` values run in parallel on
+  training recordings, judged on separate test recordings, writing the chosen config.
 
 **First milestone of a complete system:** record a market session, replay it, and execute virtual market orders with explicit liquidity and fee assumptions.
 

@@ -2,6 +2,7 @@
 #include <tickforge/execution/execution.hpp>
 #include <tickforge/execution/risk.hpp>
 #include <tickforge/strategy/threshold.hpp>
+#include <tickforge/strategy/mean_reversion.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -20,8 +21,10 @@ struct PaperScenario {
     execution::RiskLimits risk;         // [risk]; all limits off when absent
     std::vector<ScriptOrder> orders;
     std::vector<ScriptCancel> cancels;  // sent after the orders of the same event
-    std::optional<strategy::ThresholdConfig> strategy;
-    std::string strategy_type;          // "threshold" (market orders) or "threshold_maker" (limit orders)
+    std::optional<strategy::ThresholdConfig> strategy;             // threshold and threshold_maker
+    std::optional<strategy::MeanReversionConfig> mean_reversion;   // mean_reversion
+    std::string strategy_type;          // "threshold", "threshold_maker", or "mean_reversion"
+    bool has_strategy() const { return strategy || mean_reversion; }
     std::vector<std::string> overrides; // "key=value" as given, applied before validation
 };
 // Overrides replace or add scalar values by dotted key, e.g. "strategy.stop_loss=0.3%".

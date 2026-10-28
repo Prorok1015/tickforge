@@ -17,7 +17,7 @@ void live_session(const LiveOptions& options)
 {
 #ifdef TICKFORGE_ENABLE_LIVE
     const auto scenario = load_paper_scenario(options.config, options.overrides);
-    if (!scenario.strategy) throw std::runtime_error("live command requires a [strategy] section");
+    if (!scenario.has_strategy()) throw std::runtime_error("live command requires a [strategy] section");
     std::optional<PaperExport> exporter;
     if (!options.report_prefix.empty()) exporter.emplace(options.report_prefix);
     // The full-screen view needs a terminal; piped output gets the plain journal.

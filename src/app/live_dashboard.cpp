@@ -1,6 +1,7 @@
 #include "live_dashboard.hpp"
 #include "paper_reporter.hpp"
 #include <tickforge/accounting/valuation.hpp>
+#include <tickforge/core/amounts.hpp>
 #include <tickforge/console/console.hpp>
 #include <algorithm>
 #include <cstdio>
@@ -280,7 +281,7 @@ std::vector<std::string> LiveDashboard::result_panel() const
 std::vector<std::string> LiveDashboard::status_panel() const
 {
     const auto& session = *session_;
-    const auto& s = *scenario_.strategy;
+    const auto& relative = scenario_.mean_reversion;
     std::vector<std::string> lines;
     const auto bid = session.book().best_bid(), ask = session.book().best_ask();
     const auto& balances = session.account().balances();
@@ -323,20 +324,40 @@ std::vector<std::string> LiveDashboard::status_panel() const
                 lines.push_back("  ahead of the best price: first in line at a new level");
         }
     }
+    const auto average = accounting::average_cost_price(balances, session.account().position());
     if (open_orders.empty() && available_ && risk.state() == execution::TradingState::normal) {
-        if (balances.base_total > 0)
+        if (balances.base_total > 0 && relative)
+            lines.push_back(std::format("{}▶{} Holding {} BTC; selling at ≥ {} ({} above the purchase price)", cyan, reset,
+                btc(balances.base_total),
+                average ? price(amount_multiply_divide(*average, 1000000 + relative->take_profit_ppm, 1000000, true)) : "?",
+                rate(relative->take_profit_ppm)));
+        else if (balances.base_total > 0)
             lines.push_back(std::format("{}▶{} Holding {} BTC; waiting for a sell price of at least {}", cyan, reset,
-                btc(balances.base_total), price(s.sell_price_atoms)));
-        else if (ask && ask->price_atoms > s.buy_price_atoms)
+                btc(balances.base_total), price(scenario_.strategy->sell_price_atoms)));
+        else if (relative)
+            lines.push_back(std::format("{}▶{} Waiting for a dip: the best ask {} must fall below the buy line", cyan, reset,
+                ask ? price(ask->price_atoms) : std::string("?")));
+        else if (ask && ask->price_atoms > scenario_.strategy->buy_price_atoms)
             lines.push_back(std::format("{}▶{} Waiting to buy: the best ask {} is above our buy price {}", cyan, reset,
-                price(ask->price_atoms), price(s.buy_price_atoms)));
+                price(ask->price_atoms), price(scenario_.strategy->buy_price_atoms)));
         else
             lines.push_back(std::format("{}▶{} Ready to buy", cyan, reset));
     }
-    lines.push_back(std::format("{}rules: buy at ≤ {} · sell at ≥ {}, never below cost{}", dim,
-        price(s.buy_price_atoms), price(s.sell_price_atoms), reset));
-    lines.push_back(std::format("{}       {} BTC per order · up to {} USDT per buy{}", dim, btc(s.quantity_atoms),
-        usdt(s.buy_budget_quote_atoms), reset));
+    // The strategy's own view of the market: a warm-up, a moving average, a buy line.
+    if (const auto* policy = session.strategy(); policy && !policy->status().empty())
+        lines.push_back("  " + policy->status());
+    if (relative) {
+        lines.push_back(std::format("{}rules: buy {} below the {} average · sell {} above cost, never at a loss{}", dim,
+            rate(relative->entry_below_ppm), clock_text(relative->window_ns), rate(relative->take_profit_ppm), reset));
+        lines.push_back(std::format("{}       {} BTC per order · up to {} USDT per buy{}", dim, btc(relative->quantity_atoms),
+            usdt(relative->buy_budget_quote_atoms), reset));
+    } else {
+        const auto& s = *scenario_.strategy;
+        lines.push_back(std::format("{}rules: buy at ≤ {} · sell at ≥ {}, never below cost{}", dim,
+            price(s.buy_price_atoms), price(s.sell_price_atoms), reset));
+        lines.push_back(std::format("{}       {} BTC per order · up to {} USDT per buy{}", dim, btc(s.quantity_atoms),
+            usdt(s.buy_budget_quote_atoms), reset));
+    }
     const bool maker = scenario_.strategy_type == "threshold_maker";
     lines.push_back(std::format("{}       {} · fee {} of each trade{}", dim,
         maker ? "limit orders that wait in the book" : "market orders that take the best price",

@@ -72,6 +72,8 @@ public:
     std::vector<execution::OpenOrder> open_orders() const { return manager_.open_orders(); }
     // Estimated size ahead of a resting order in its price queue (presentation only).
     std::optional<std::int64_t> queue_ahead(std::int64_t order_id) const { return simulator_.queue_ahead(order_id); }
+    // The decision policy, if any, for presentation (its status line).
+    const strategy::Strategy* strategy() const { return strategy_.get(); }
 private:
     void submit_at(const EventTime& time, const Order& order, std::string_view signal);
     void collect();

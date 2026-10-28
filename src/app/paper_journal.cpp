@@ -2,19 +2,43 @@
 #include "paper_reporter.hpp"
 #include <tickforge/core/amounts.hpp>
 #include <tickforge/strategy/threshold_maker.hpp>
+#include <tickforge/strategy/mean_reversion.hpp>
 #include <tickforge/console/console.hpp>
 #include <format>
 
 namespace tickforge::app {
 std::unique_ptr<strategy::Strategy> make_strategy(const PaperScenario& scenario)
 {
+    if (scenario.mean_reversion) return std::make_unique<strategy::MeanReversion>(*scenario.mean_reversion);
     if (!scenario.strategy) return nullptr;
     if (scenario.strategy_type == "threshold_maker") return std::make_unique<strategy::ThresholdMaker>(*scenario.strategy);
     return std::make_unique<strategy::Threshold>(*scenario.strategy);
 }
 
+// "0.15%" from parts per million, without trailing zeros past two decimals.
+std::string percent_text(std::int64_t ppm)
+{
+    auto text = std::format("{}.{:04}", ppm / 10000, ppm % 10000);
+    while (text.size() > text.find('.') + 3 && text.back() == '0') text.pop_back();
+    return text + "%";
+}
+
 std::string strategy_header(const PaperScenario& scenario)
 {
+    if (const auto& m = scenario.mean_reversion)
+        return std::format(
+            "Strategy  | mean_reversion | buy when the ask is {} below the {} s average of the mid price | "
+            "sell {} above cost, never below fee-adjusted cost\n"
+            "Warm-up   | no buys until {} s of prices are collected; again after a gap over {} s\n"
+            "Stop-loss | {}\n"
+            "Cooldown  | {}\n"
+            "Decision  | once per event, confirmed inventory and open orders\n\n",
+            percent_text(m->entry_below_ppm), m->window_ns / 1000000000, percent_text(m->take_profit_ppm),
+            m->window_ns / 1000000000, m->max_gap_ns / 1000000000,
+            m->stop_loss_ppm == 0 ? std::string("off")
+                : std::format("sell at market when position value is {} ppm below cost", m->stop_loss_ppm),
+            m->cooldown_ns == 0 ? std::string("off")
+                : std::format("no buys for {} ns after a stop-loss closes the position", m->cooldown_ns));
     const auto& s = *scenario.strategy;
     return std::format(
         "{}"

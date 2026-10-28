@@ -1,10 +1,16 @@
 #include <tickforge/strategy/threshold.hpp>
 #include <tickforge/strategy/threshold_maker.hpp>
+#include <tickforge/strategy/mean_reversion.hpp>
+#include <source_location>
 #include <stdexcept>
+#include <string>
 #include <cstdio>
 
 using namespace tickforge;
-void check(bool ok) { if (!ok) throw std::runtime_error("strategy contract failed"); }
+void check(bool ok, std::source_location where = std::source_location::current())
+{
+    if (!ok) throw std::runtime_error("strategy contract failed at line " + std::to_string(where.line()));
+}
 // The first order a strategy places on this view, if any.
 std::optional<Order> decide(strategy::Strategy& algorithm, const strategy::View& view)
 {
@@ -74,9 +80,57 @@ void maker()
     check(stop && stop->signal == strategy::Signal::stop_loss && stop->order.type == OrderType::market &&
           stop->order.side == Side::sell && stop->order.quantity_atoms == 100000);
 }
+void mean_reversion()
+{
+    using strategy::View;
+    constexpr std::int64_t second = 1000000000;
+    // 3 s window, buy 1% below the average, take profit 1%, 0.001 BTC, 3 s max gap (any
+    // stretch without a usable view counts, so the quiet 2.5 s below must stay under it).
+    strategy::MeanReversionConfig config{3 * second, 10000, 10000, 100000, 1000000000, 1000, 1000, 0, 0, 3 * second};
+    strategy::MeanReversion algorithm(config);
+    std::int64_t ordinal = 0;
+    const auto view = [&](std::int64_t elapsed, std::int64_t bid, std::int64_t ask, std::int64_t btc = 0,
+                          std::int64_t cost = 0) {
+        return View{{++ordinal, 0, 0, elapsed}, true, Level{bid, 1000000}, Level{ask, 1000000},
+                    {10000000000, 0, btc, 0}, {cost, 0}};
+    };
+    const auto places = [](const std::vector<strategy::Action>& actions) {
+        for (const auto& action : actions)
+            if (const auto* place = std::get_if<strategy::Place>(&action)) return std::optional(place->order);
+        return std::optional<Order>{};
+    };
+    // Warm-up: even a deep dip buys nothing before the window is full.
+    check(!places(algorithm.on_market(view(0, 9999, 10001))) && !algorithm.warm());
+    check(algorithm.status().starts_with("warming up: 0:01 of 0:03"));
+    // A quiet second repeats the last mid; at 2.5 s the window (slots 0, 1, 2) is full.
+    const auto warmed = algorithm.on_market(view(2500000000, 9999, 10001));
+    check(algorithm.warm() && algorithm.average_price() == 10000 && algorithm.entry_price() == 9900 &&
+          !places(warmed) && std::get_if<strategy::Notice>(&warmed.back()));
+    // The current price joins the average before the decision, so a dip must be deep enough:
+    // slots 1, 2, 3 = 100.00, 100.00, 94.99 -> average 98.33, buy line 97.35.
+    const auto buy = places(algorithm.on_market(view(3 * second, 9498, 9500)));
+    check(buy && buy->side == Side::buy && buy->quantity_atoms == 100000 && buy->max_spend_quote_atoms == 1000000000);
+    // Holding at an average cost of 95.10: take profit 1% above it, at 96.06 or more.
+    check(!places(algorithm.on_market(view(3 * second + 1, 9600, 9602, 100000, 9510000))));
+    const auto sell = places(algorithm.on_market(view(3 * second + 2, 9606, 9608, 100000, 9510000)));
+    check(sell && sell->side == Side::sell && sell->quantity_atoms == 100000);
+    // More than max_gap without usable quotes: the history is stale, the warm-up restarts.
+    View dark = view(4 * second, 9999, 10001);
+    dark.available = false;
+    check(!places(algorithm.on_market(dark)) && algorithm.warm());
+    const auto after = algorithm.on_market(view(7 * second, 9000, 9002));
+    check(!algorithm.warm() && !places(after) && std::get_if<strategy::Notice>(&after.front()));
+    // Absolute prices are not part of this strategy: a zero entry or a partial-second window is invalid.
+    bool refused = false;
+    try { strategy::MeanReversion({1500000000, 10000, 10000, 100000, 1000000000, 1000, 1000}); }
+    catch (const std::runtime_error&) { refused = true; }
+    check(refused);
+}
+
 int main()
 {
     try {
+        mean_reversion();
         strategy::Threshold algorithm({10000, 10200, 200000, 1000000000, 1000, 0});
         strategy::Strategy& interface = algorithm;
         strategy::View view{{1, 0, 0, 0}, false, Level{9900, 1000000}, Level{10000, 100000},

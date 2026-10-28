@@ -15,7 +15,7 @@ void paper_session(const PaperOptions& options)
     const std::string_view session_path = options.session, scenario_path = options.config;
     const bool automatic = options.automatic;
     const auto scenario = load_paper_scenario(scenario_path, options.overrides);
-    if (automatic != scenario.strategy.has_value())
+    if (automatic != scenario.has_strategy())
         throw std::runtime_error("strategy command requires a [strategy] section; paper command requires [[orders]] instead");
     std::ifstream input{std::string(session_path)};
     if (!input) throw std::runtime_error(std::format("cannot open session '{}'", session_path));

@@ -186,12 +186,30 @@ PaperScenario load_paper_scenario(std::string_view path, const std::vector<std::
     const auto* orders = root.get("orders");
     const auto* cancels = root.get("cancels");
     if (strategy_table && (orders || cancels)) fail("strategy", "use either [strategy] or [[orders]], not both");
-    if (strategy_table) {
+    const auto* strategy_type = strategy_table ? strategy_table->get("type") : nullptr;
+    if (strategy_type && strategy_type->is_string() && strategy_type->as_string()->get() == "mean_reversion") {
+        // Relative to the market: no absolute prices, so the threshold keys are unknown here.
+        const Section strategy(*strategy_table, "strategy.", {"type", "window", "entry_below", "take_profit",
+            "quantity", "buy_budget", "stop_loss", "cooldown", "max_gap"});
+        result.strategy_type = "mean_reversion";
+        result.mean_reversion = strategy::MeanReversionConfig{strategy.get("window", parse_duration_ns),
+            strategy.get("entry_below", parse_percent_ppm), strategy.get("take_profit", parse_percent_ppm),
+            strategy.get("quantity", parse_quantity), strategy.get("buy_budget", parse_quote),
+            result.config.quantity_step_atoms, result.config.fee_ppm,
+            strategy.get_or("stop_loss", parse_percent_ppm, "0%"), strategy.get_or("cooldown", parse_duration_ns, "0s"),
+            strategy.get_or("max_gap", parse_duration_ns, "10s")};
+        try {
+            strategy::validate_config(*result.mean_reversion);
+        } catch (const std::runtime_error& error) {
+            fail("strategy", error.what());
+        }
+    } else if (strategy_table) {
         const Section strategy(*strategy_table, "strategy.", {"type", "buy_below", "sell_above", "quantity",
             "buy_budget", "stop_loss", "cooldown"});
         result.strategy_type = strategy.text("type");
         if (result.strategy_type != "threshold" && result.strategy_type != "threshold_maker")
-            fail("strategy.type", "must be \"threshold\" (market orders) or \"threshold_maker\" (limit orders)");
+            fail("strategy.type", "must be \"threshold\" (market orders), \"threshold_maker\" (limit orders), "
+                                  "or \"mean_reversion\" (relative to a moving average)");
         result.strategy = strategy::ThresholdConfig{strategy.get("buy_below", parse_price),
             strategy.get("sell_above", parse_price), strategy.get("quantity", parse_quantity),
             strategy.get("buy_budget", parse_quote), result.config.quantity_step_atoms, result.config.fee_ppm,

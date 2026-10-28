@@ -29,7 +29,7 @@ tickforge/
     strategy/                      library: tickforge_strategy (decision policies)
       CMakeLists.txt
       include/tickforge/strategy/   Strategy interface and actions, View, shared rules, ThresholdConfig
-      src/                         rules, threshold and threshold_maker policies
+      src/                         rules, threshold, threshold_maker, mean_reversion policies
     engine/                        library: tickforge_engine (the shared per-event loop)
       CMakeLists.txt
       include/tickforge/engine/     Session, SessionConfig, SessionObserver, Mark
@@ -269,8 +269,10 @@ example balances, PnL rules, and failure behavior.
 cancel, notice) from a value snapshot of quotes, event time, availability, balances,
 position, risk state, and open orders. The app fills the quotes from
 `Simulator::executable_level`, which nets out virtual consumption. `rules.hpp/.cpp`
-holds shared decision rules; `threshold.hpp/.cpp` (market orders) and
-`threshold_maker.hpp/.cpp` (resting limit orders) implement the two policies. The
+holds shared decision rules; `threshold.hpp/.cpp` (market orders),
+`threshold_maker.hpp/.cpp` (resting limit orders), and `mean_reversion.hpp/.cpp`
+(relative to a moving average, with a warm-up) implement the policies. A policy may
+describe what it is waiting for through `status()`, which the live view shows. The
 engine invokes the policy after each simulator update and risk check, and submits its
 actions through OrderManager; `paper_command.cpp` builds the policy from the config.
 `paper_scenario.*` validates either scripted `[[orders]]` or a `[strategy]` table.

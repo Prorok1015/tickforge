@@ -47,5 +47,7 @@ public:
     virtual ~Strategy() = default;
     // Called once per event; actions are carried out in the returned order.
     virtual std::vector<Action> on_market(const View& view) = 0;
+    // What the strategy is waiting for, in plain words, for people watching a run.
+    virtual std::string status() const { return {}; }
 };
 } // namespace tickforge::strategy
