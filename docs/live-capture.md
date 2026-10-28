@@ -32,11 +32,14 @@ virtual funds. No order leaves the machine; there are still no keys.
   second of session time. Its panels answer, from top to bottom, the questions a
   person watching asks:
   - **RESULT**: how am I doing? Total profit in USDT and percent of the starting
-    money, split into closed trades and the open position, plus round trips and fees.
+    money (three decimals, so small paper results do not round to zero), split into
+    closed trades and the open position, plus round trips. Fees paid are shown in
+    USDT and as a percentage of the starting money; they are already in the result.
   - **BOT**: what is the bot doing and why? Each open order in plain words: waiting
     to buy or sell at a price, our estimated place in the queue when we are the best
     price, or how far the market has to move to reach an order that it moved away
-    from. Then the strategy's rules.
+    from. Then the strategy's rules: buy and sell prices, size and budget per order,
+    order type, and the fee rate of each trade in percent.
   - **MARKET**: five price levels per side with size bars, our resting orders marked
     beside their level, and a note for our orders outside the shown levels.
   - **WALLET**: USDT and BTC with the free and the locked (reserved) parts, and the
@@ -44,7 +47,8 @@ virtual funds. No order leaves the machine; there are still no keys.
   - **ACTIVITY**: the latest events as sentences: placed, bought, sold (and whether
     our order was hit or we took the price), cancels, risk stops, and feed status.
 
-  The final summary is printed after the view closes. `--plain`, or output that is
+  The view is 80 columns wide; longer lines wrap inside their panel at word
+  boundaries instead of being cut. The final summary is printed after the view closes. `--plain`, or output that is
   not a terminal, prints the journal lines instead, without a line per event.
 
 **Replay equals live.** The engine reads no clock: decisions, latency, and risk use

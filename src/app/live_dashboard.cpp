@@ -40,13 +40,47 @@ std::string repeat(std::string_view piece, std::size_t times)
     return out;
 }
 
-// A titled box spanning the frame width.
+// Splits a line into pieces of at most `limit` columns at spaces, so nothing is lost
+// or pushed past the frame. Continuations are indented and keep the active style.
+std::vector<std::string> wrap(std::string text, std::size_t limit)
+{
+    std::vector<std::string> pieces;
+    while (columns(text) > limit) {
+        std::size_t count = 0, cut = std::string::npos, hard = text.size();
+        std::string style, style_at_cut;
+        bool words = false; // leading indentation is not a place to break
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            if (text[i] == '\x1b') {
+                const auto start = i;
+                while (i < text.size() && !((text[i] >= 'A' && text[i] <= 'Z') || (text[i] >= 'a' && text[i] <= 'z'))) ++i;
+                style = text.substr(start, i - start + 1);
+                continue;
+            }
+            if ((static_cast<unsigned char>(text[i]) & 0xC0) == 0x80) continue;
+            if (count == limit) { hard = i; break; }
+            if (text[i] == ' ' && words) { cut = i; style_at_cut = style; }
+            if (text[i] != ' ') words = true;
+            ++count;
+        }
+        // A word longer than the whole line is split where it reaches the edge.
+        const auto end = cut == std::string::npos ? hard : cut;
+        pieces.push_back(text.substr(0, end) + reset);
+        text = style_at_cut + "  " + text.substr(cut == std::string::npos ? end : end + 1);
+    }
+    pieces.push_back(std::move(text));
+    return pieces;
+}
+
+// A titled box spanning the frame width; longer lines wrap inside it.
 std::vector<std::string> panel(std::string_view title, const std::vector<std::string>& body)
 {
     std::vector<std::string> lines;
     lines.push_back(std::format("{}┌─ {}{}{}{} {}┐{}", dim, reset, bold, title, dim,
         repeat("─", width - 5 - columns(title)), reset));
-    for (const auto& line : body) {
+    std::vector<std::string> wrapped;
+    for (const auto& text : body)
+        for (auto& piece : wrap(text, width - 4)) wrapped.push_back(std::move(piece));
+    for (const auto& line : wrapped) {
         const auto used = columns(line);
         lines.push_back(std::format("{}│{} {}{} {}│{}", dim, reset, line, std::string(used < width - 4 ? width - 4 - used : 0, ' '),
             dim, reset));
@@ -77,6 +111,21 @@ std::string signed_usdt(std::int64_t atoms)
 {
     const auto text = signed_money_text(atoms);
     return grouped(text.substr(0, text.size() - 4));
+}
+// part / whole as a signed percentage with three decimals, so that the small results
+// and fees of a paper run do not all round to 0.00%.
+std::string percent(std::int64_t part, std::int64_t whole, bool sign = true)
+{
+    const auto thousandths = whole == 0 ? 0 : part * 100000 / whole;
+    const auto magnitude = thousandths < 0 ? -thousandths : thousandths;
+    return std::format("{}{}.{:03}%", !sign ? "" : part < 0 ? "-" : "+", magnitude / 1000, magnitude % 1000);
+}
+// A fee rate in parts per million as a percentage, without trailing zeros past two decimals.
+std::string rate(std::int64_t ppm)
+{
+    auto text = std::format("{}.{:04}", ppm / 10000, ppm % 10000);
+    while (text.size() > text.find('.') + 3 && text.back() == '0') text.pop_back();
+    return text + "%";
 }
 std::string colored(std::int64_t value, const std::string& text)
 {
@@ -141,6 +190,7 @@ void LiveDashboard::on_market(const MarketEvent& event, bool available, std::opt
         remember(std::format("{}Market data interrupted{}: orders stay; new ones wait for the book", yellow, reset));
     connected_ = available ? true : std::holds_alternative<BookReset>(event.data) ? false : connected_;
     available_ = available;
+    if (const auto* end = std::get_if<BookReset>(&event.data); end && end->reason == "shutdown") stopped_ = true;
     if (open_ && (last_draw_ns_ < 0 || now_ns_ - last_draw_ns_ >= redraw_ns)) {
         render();
         last_draw_ns_ = now_ns_;
@@ -213,16 +263,17 @@ std::vector<std::string> LiveDashboard::result_panel() const
         equity = value.equity_quote;
     }
     const auto total = position.realized_pnl_quote + unrealized;
-    // Basis points of the starting money, shown as a signed percentage with two decimals.
-    const auto bp = start == 0 ? 0 : total * 10000 / start;
-    const auto percent = std::format("{}{}.{:02}%", total < 0 ? "-" : "+", std::abs(bp) / 100, std::abs(bp) % 100);
+    const auto fees = journal_.totals.fees;
     return {
         std::format("{}{} USDT{}  {}   = closed trades {}  + open position {}", bold,
-            colored(total, signed_usdt(total)), reset, colored(total, percent),
+            colored(total, signed_usdt(total)), reset, colored(total, percent(total, start)),
             colored(position.realized_pnl_quote, signed_usdt(position.realized_pnl_quote)),
             colored(unrealized, signed_usdt(unrealized))),
-        std::format("{}worth {} USDT · started {} · {} round trips · fees {}{}", dim, usdt(equity),
-            usdt(start), round_trips_, usdt(journal_.totals.fees), reset),
+        std::format("{}worth {} USDT · started with {} · {} round trips{}", dim, usdt(equity), usdt(start), round_trips_,
+            reset),
+        // Fees are already inside the result; the percentage shows how much of the money they took.
+        std::format("{}fees paid {}{} USDT = {} of the starting money{}, already in the result{}", dim, reset,
+            usdt(fees), percent(fees, start, false), dim, reset),
     };
 }
 
@@ -235,7 +286,9 @@ std::vector<std::string> LiveDashboard::status_panel() const
     const auto& balances = session.account().balances();
     const auto open_orders = session.open_orders();
     const auto& risk = session.risk();
-    if (risk.state() != execution::TradingState::normal) {
+    if (stopped_) {
+        lines.push_back(std::format("{}■ Session stopped{}: open orders are being cancelled, results saved next", yellow, reset));
+    } else if (risk.state() != execution::TradingState::normal) {
         lines.push_back(std::format("{}■ Risk limit reached: {}{}", red,
             risk.state() == execution::TradingState::halted ? "no more orders" : "only selling is allowed", reset));
     } else if (!available_) {
@@ -282,9 +335,12 @@ std::vector<std::string> LiveDashboard::status_panel() const
     }
     lines.push_back(std::format("{}rules: buy at ≤ {} · sell at ≥ {}, never below cost{}", dim,
         price(s.buy_price_atoms), price(s.sell_price_atoms), reset));
-    lines.push_back(std::format("{}       {} BTC per order · {}{}", dim, btc(s.quantity_atoms),
-        scenario_.strategy_type == "threshold_maker" ? "limit orders that wait in the book (maker)"
-                                                     : "market orders that take the best price (taker)", reset));
+    lines.push_back(std::format("{}       {} BTC per order · up to {} USDT per buy{}", dim, btc(s.quantity_atoms),
+        usdt(s.buy_budget_quote_atoms), reset));
+    const bool maker = scenario_.strategy_type == "threshold_maker";
+    lines.push_back(std::format("{}       {} · fee {} of each trade{}", dim,
+        maker ? "limit orders that wait in the book" : "market orders that take the best price",
+        rate(maker ? scenario_.config.maker_fee_ppm : scenario_.config.fee_ppm), reset));
     return lines;
 }
 
@@ -333,13 +389,14 @@ std::vector<std::string> LiveDashboard::money_panel() const
 {
     const auto& balances = session_->account().balances();
     const auto average = accounting::average_cost_price(balances, session_->account().position());
-    return {
+    std::vector<std::string> lines{
         std::format("USDT {:>14}   {}free {}{} · locked in orders {}", usdt(balances.quote_total), dim, reset,
             usdt(balances.available_quote()), usdt(balances.quote_reserved)),
-        std::format("BTC  {:>14}   {}free {}{} · locked in orders {}{}", btc(balances.base_total), dim, reset,
-            btc(balances.available_base()), btc(balances.base_reserved),
-            average ? std::format(" · bought at {} on average", price(*average)) : std::string()),
+        std::format("BTC  {:>14}   {}free {}{} · locked in orders {}", btc(balances.base_total), dim, reset,
+            btc(balances.available_base()), btc(balances.base_reserved)),
     };
+    if (average) lines.push_back(std::format("{}     bought at {} on average, fees included{}", dim, price(*average), reset));
+    return lines;
 }
 
 void LiveDashboard::render()
@@ -347,11 +404,13 @@ void LiveDashboard::render()
     if (!session_) return;
     std::vector<std::string> lines;
     // Title row: what this is, whether data flows, and how long is left.
-    const auto progress = duration_ns_ <= 0 ? 0 : static_cast<std::size_t>(std::min<std::int64_t>(16, now_ns_ * 16 / duration_ns_));
+    // Box-drawing lines are one column in every terminal font, unlike most block symbols.
+    constexpr std::int64_t bar = 12;
+    const auto progress = duration_ns_ <= 0 ? 0 : static_cast<std::size_t>(std::min<std::int64_t>(bar, now_ns_ * bar / duration_ns_));
     const auto title = std::format("{}tickforge · LIVE PAPER TRADING · BTCUSDT{}", bold, reset);
-    const auto state = std::format("{}● {}{}  {} / {} {}{}{}{}", available_ ? green : yellow,
-        available_ ? "live" : "no data", reset, clock_text(now_ns_), clock_text(duration_ns_), cyan, repeat("▰", progress),
-        repeat("▱", 16 - progress), reset);
+    const auto state = std::format("{}● {}{}  {} / {} {}{}{}{}{}", available_ ? green : yellow,
+        stopped_ ? "stopped" : available_ ? "live" : "no data", reset, clock_text(now_ns_), clock_text(duration_ns_), cyan, repeat("━", progress),
+        dim, repeat("─", bar - progress), reset);
     lines.push_back(title + std::string(width > columns(title) + columns(state) ? width - columns(title) - columns(state) : 1, ' ') + state);
     lines.push_back(std::format("{}virtual money only: nothing is sent to the exchange{}", dim, reset));
     for (const auto& line : panel("RESULT", result_panel())) lines.push_back(line);

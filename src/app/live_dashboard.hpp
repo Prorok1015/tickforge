@@ -50,6 +50,6 @@ private:
     std::int64_t duration_ns_;
     std::deque<std::string> recent_;
     std::int64_t now_ns_ = 0, last_draw_ns_ = -1, round_trips_ = 0;
-    bool available_ = false, connected_ = false, open_ = false;
+    bool available_ = false, connected_ = false, stopped_ = false, open_ = false;
 };
 } // namespace tickforge::app
