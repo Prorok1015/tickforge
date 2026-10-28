@@ -1,0 +1,4 @@
+add_executable(engine_tests engine_tests.cpp)
+target_link_libraries(engine_tests PRIVATE tickforge_engine)
+tickforge_enable_warnings(engine_tests)
+add_test(NAME engine_contract COMMAND engine_tests)

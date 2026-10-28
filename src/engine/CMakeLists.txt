@@ -1,0 +1,4 @@
+add_library(tickforge_engine include/tickforge/engine/session.hpp src/session.cpp)
+target_include_directories(tickforge_engine PUBLIC include)
+target_link_libraries(tickforge_engine PUBLIC tickforge_core tickforge_accounting tickforge_execution tickforge_strategy)
+tickforge_enable_warnings(tickforge_engine)

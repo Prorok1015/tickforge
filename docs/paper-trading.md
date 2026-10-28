@@ -99,8 +99,11 @@ flowchart LR
 - `tickforge_execution` owns the execution interface, simulator, and order manager.
   It depends on accounting and core. The simulator itself does not change balances;
   the manager feeds confirmed fills into the ledger.
-- The app reads a TOML config, connects replay to the simulator, submits scheduled
-  requests, and prints journal entries and final balances.
+- `tickforge_engine` owns the per-event loop (`Session`): it connects pushed market
+  events to the simulator, risk guard, strategy, and order manager, and reports what
+  happened to an observer. It reads no clock.
+- The app reads a TOML config, replays the session file into the engine, submits
+  scheduled requests between events, and prints journal entries and final balances.
 
 The account is a starting point for reuse with future real execution reports. It
 currently models one base/quote pair, nonnegative balances, and USDT fees. Durable

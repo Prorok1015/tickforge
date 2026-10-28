@@ -156,7 +156,7 @@ the simulator should exercise them first.
 ### 5. Forward paper trading and a shared session engine
 
 - [ ] Define a market source interface implemented by file replay and the live feed.
-- [ ] Extract the per-event loop (source -> risk -> strategy -> order manager ->
+- [x] Extract the per-event loop (source -> risk -> strategy -> order manager ->
   reports) from the app into a reusable `tickforge_engine` target.
 - [ ] Add a forward paper mode: the live public feed with simulated execution and
   virtual funds, no keys.

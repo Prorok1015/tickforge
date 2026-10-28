@@ -30,6 +30,10 @@ tickforge/
       CMakeLists.txt
       include/tickforge/strategy/   Strategy interface and actions, View, shared rules, ThresholdConfig
       src/                         rules, threshold and threshold_maker policies
+    engine/                        library: tickforge_engine (the shared per-event loop)
+      CMakeLists.txt
+      include/tickforge/engine/     Session, SessionConfig, SessionObserver, Mark
+      src/
     console/                       library: tickforge_console
       CMakeLists.txt
       include/tickforge/console/    public presentation headers
@@ -47,7 +51,7 @@ tickforge/
       commands.hpp                 command declarations
       replay_command.cpp           replay command
       capture_command.cpp          capture command / disabled-feature error
-      paper_command.cpp            offline paper trading command
+      paper_command.cpp            offline paper trading command: replay -> engine, journal observer
       paper_scenario.*             TOML experiment config, overrides, schema checks
       paper_reporter.*             virtual-order/account journal
       paper_export.*               machine-readable order/fill/markout/summary CSV reports
@@ -58,6 +62,7 @@ tickforge/
     accounting/                    ledger, PnL valuation, and checked money arithmetic
     execution/                     fills, virtual liquidity, and risk
     strategy/                      decisions and confirmed-inventory behavior
+    engine/                        loop order, determinism, scripted orders
     console/                       exact decimal display
     adapters/binance/              Binance-shaped JSON (no network)
     app/                           CLI integration checks
@@ -79,6 +84,11 @@ flowchart TD
     App --> Execution["execution: tickforge_execution"]
     App --> Accounting["accounting: tickforge_accounting"]
     App --> Strategy["strategy: tickforge_strategy"]
+    App --> Engine["engine: tickforge_engine"]
+    Engine --> Execution
+    Engine --> Strategy
+    Engine --> Accounting
+    Engine --> Core
     Strategy --> Accounting
     Strategy --> Core
     Execution --> Accounting
@@ -223,6 +233,15 @@ drawdown, and order-rate limits and escalates normal -> reduce-only -> halted.
 reserves funds, and submits or cancels; `collect()` later validates confirmed
 reports (open ones carry partial fills) and commits them to the account.
 
+`engine/session.hpp` is the loop every mode shares. `Session::on_event` takes one
+pushed market event and runs simulator -> confirmed reports -> valuation -> risk ->
+strategy -> orders; `submit`/`cancel` accept scripted requests between events and
+`finish` ends the market data. It reads no clock: all time comes from event receive
+offsets, so replaying a recorded session with the same config reproduces a run
+exactly. It prints nothing; a `SessionObserver` receives market, report, request,
+risk, signal, cancel, and notice callbacks, and the app's observers turn them into
+the console journal, totals, markouts, and CSV reports.
+
 The app's `paper_command.cpp` connects these pieces; `paper_scenario.*` reads the
 TOML config (with `--set` overrides) into atoms using `core/units`,
 experimental inputs, `paper_reporter.*` prints the operation journal, and
@@ -240,8 +259,8 @@ position, risk state, and open orders. The app fills the quotes from
 `Simulator::executable_level`, which nets out virtual consumption. `rules.hpp/.cpp`
 holds shared decision rules; `threshold.hpp/.cpp` (market orders) and
 `threshold_maker.hpp/.cpp` (resting limit orders) implement the two policies. The
-app's existing `paper_command.cpp` also assembles the `strategy` command, invoking
-the policy after each simulator update and before submitting through OrderManager.
+engine invokes the policy after each simulator update and risk check, and submits its
+actions through OrderManager; `paper_command.cpp` builds the policy from the config.
 `paper_scenario.*` validates either scripted `[[orders]]` or a `[strategy]` table.
 See [strategies](strategies.md) for the event-flow diagram, input units, assumptions,
 and a synthetic partial-buy/recovery/sell example. Strategy does not link execution,

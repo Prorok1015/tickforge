@@ -3,12 +3,12 @@
 #include "paper_diagnostics.hpp"
 #include <tickforge/core/events.hpp>
 #include <tickforge/execution/order_manager.hpp>
+#include <tickforge/engine/session.hpp>
 
 #include <optional>
 
 namespace tickforge::app {
-// Last best bid observed while execution was available: the valuation price.
-struct Mark { std::int64_t price_atoms; std::int64_t ordinal; };
+using Mark = engine::Mark;
 
 // 1e-8 USDT atoms as a fixed eight-decimal amount.
 std::string money_text(std::int64_t atoms);
