@@ -149,14 +149,30 @@ The asynchronous lifecycle, risk stops, and persistence are simulation features 
 their own right. They are also the parts a later live adapter would depend on, so
 the simulator should exercise them first.
 
-### 5. Linux performance research
+### 5. Forward paper trading and a shared session engine
+
+- [ ] Define a market source interface implemented by file replay and the live feed.
+- [ ] Extract the per-event loop (source -> risk -> strategy -> order manager ->
+  reports) from the app into a reusable `tickforge_engine` target.
+- [ ] Add a forward paper mode: the live public feed with simulated execution and
+  virtual funds, no keys.
+- [ ] Record the live session alongside forward trading so the run can be replayed.
+
+Paper, forward, testnet, and live runs differ only at the edges: where events come
+from and where orders go. The loop between them must be one shared implementation so
+that simulated behaviour cannot drift from live behaviour. Modes are combinations of
+interchangeable parts selected by the app, not separate copies of the loop. The
+extraction waits for the forward mode, its first second consumer, and for limit orders
+to settle the shape of the loop.
+
+### 6. Linux performance research
 
 - [ ] Measure processing latency, including percentiles.
 - [ ] Profile CPU use, allocations, and system calls.
 - [ ] Investigate socket buffering, event-driven I/O, and scheduling.
 - [ ] Evaluate concurrency and CPU affinity where justified.
 
-### 6. Optional future live execution
+### 7. Optional future live execution
 
 A live execution adapter may be explored after the simulator, accounting, and risk controls have been validated. This is a later research direction; real order submission is outside the initial scope.
 
@@ -169,7 +185,7 @@ code at every stage:
 3. **Real funds:** minimal amounts first.
 
 A web interface could later show sessions and results and switch a strategy between
-stages. None of this is planned work yet. Prerequisites beyond sections 4-5 would
+stages. None of this is planned work yet. Prerequisites beyond sections 4-6 would
 include a separate authenticated execution adapter (never part of the public
 market-data adapter), client order IDs for safe retries, reconciliation of orders and
 balances against the exchange after disconnects, venue order filters and rate limits,
