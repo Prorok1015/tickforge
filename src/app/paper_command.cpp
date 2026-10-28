@@ -47,7 +47,8 @@ void paper_session(std::string_view session_path, std::string_view scenario_path
             mark = Mark{bid->price_atoms, event.time.ordinal};
         if (algorithm) {
             const auto order = algorithm->on_market({event.time, simulator.available(),
-                simulator.book().best_bid(), simulator.book().best_ask(), account.balances()});
+                simulator.executable_level(Side::sell), simulator.executable_level(Side::buy),
+                account.balances(), account.position()});
             if (order) {
                 write_console(std::format("Signal    | event #{} | {} threshold reached\n", event.time.ordinal,
                     order->side == Side::buy ? "BUY ask" : "SELL bid"));

@@ -13,6 +13,9 @@ public:
     bool available() const override;
     ExecutionResult execute(const MarketOrder& order) override;
     const OrderBook& book() const { return tracker_.view(); }
+    // Best level an order on `side` would hit now, net of this run's virtual
+    // consumption: asks for buys, bids for sells. nullopt when nothing is left.
+    std::optional<Level> executable_level(Side side) const;
 private:
     PaperConfig config_;
     BookTracker tracker_;

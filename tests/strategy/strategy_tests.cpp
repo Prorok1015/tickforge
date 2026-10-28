@@ -7,10 +7,10 @@ void check(bool ok) { if (!ok) throw std::runtime_error("strategy contract faile
 int main()
 {
     try {
-        strategy::Threshold algorithm({10000, 10200, 200000, 1000000000, 1000});
+        strategy::Threshold algorithm({10000, 10200, 200000, 1000000000, 1000, 0});
         strategy::Strategy& interface = algorithm;
         strategy::View view{{1, 0, 0, 0}, false, Level{9900, 1000000}, Level{10000, 100000},
-            {10000000000, 0, 0, 0}};
+            {10000000000, 0, 0, 0}, {}};
         check(!interface.on_market(view)); // Recovery/stale data must not trigger.
         ++view.time.ordinal; view.available = true;
         auto order = interface.on_market(view);
@@ -37,8 +37,29 @@ int main()
         try { interface.on_market(view); } catch (const std::runtime_error&) { threw = true; }
         check(threw);
         threw = false;
-        try { strategy::Threshold bad({10200, 10000, 1, 1, 1000}); } catch (const std::runtime_error&) { threw = true; }
+        try { strategy::Threshold bad({10200, 10000, 1, 1, 1000, 0}); } catch (const std::runtime_error&) { threw = true; }
         check(threw);
+        threw = false;
+        try { strategy::Threshold bad({10000, 10200, 1000, 1, 1000, 1000001}); } catch (const std::runtime_error&) { threw = true; }
+        check(threw);
+
+        // Break-even selling: 0.002 BTC held at an average cost of 102.00 USDT, fee 0.1%.
+        // The sale must return the cost after the fee: bid >= 102.00 / 0.999 = 102.102...
+        strategy::Threshold careful({10000, 10200, 200000, 1000000000, 1000, 1000});
+        strategy::View held{{1, 0, 0, 0}, true, Level{10200, 1000000}, Level{10300, 1000000},
+            {0, 0, 200000, 0}, {20400000, 0}};
+        check(!careful.on_market(held)); // At the threshold, but the fee would realize a loss.
+        ++held.time.ordinal; held.bid = Level{10210, 1000000};
+        check(!careful.on_market(held)); // 20420000 - 20420 fee < 20400000 cost.
+        ++held.time.ordinal; held.bid = Level{10211, 1000000};
+        order = careful.on_market(held);
+        check(order && order->side == Side::sell && order->quantity_atoms == 200000);
+        // A thin best bid caps the sale (rounded to step) so it cannot slip to worse levels.
+        ++held.time.ordinal; held.bid = Level{10211, 50500};
+        order = careful.on_market(held);
+        check(order && order->side == Side::sell && order->quantity_atoms == 50000);
+        ++held.time.ordinal; held.bid = Level{10211, 999};
+        check(!careful.on_market(held)); // Less than one quantity step is available.
         return 0;
     } catch (const std::exception& error) { std::fprintf(stderr, "%s\n", error.what()); return 1; }
 }

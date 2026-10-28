@@ -36,7 +36,9 @@ flowchart LR
 ```
 
 For each event the app first updates the simulator, then builds a value snapshot
-of current bid/ask, availability, event time, and confirmed balances. It invokes
+of current bid/ask, availability, event time, confirmed balances, and the position
+(cost basis and realized PnL). Bid/ask are the best levels still executable for
+this account: recorded size minus liquidity consumed by earlier virtual orders. It invokes
 `Strategy::on_market` once and submits at most one proposed market order through
 the existing risk/reservation/execution path. It prints the triggering event and
 side before the request, fills, fees, and resulting balances. The next decision
@@ -71,8 +73,18 @@ The `paper` command rejects threshold configurations, and `strategy` rejects
 scripted scenarios. Mixing the two kinds of rows is invalid.
 
 When flat, the policy proposes a buy at or below the threshold. When holding BTC,
-it proposes a sale at or above the other threshold, capped by the configured lot
-and available inventory and rounded down to the quantity step. It does not top up
+it proposes a sale at or above the other threshold, capped by the configured lot,
+available inventory, and the size of the best executable bid, then rounded down to
+the quantity step. Capping by the best bid keeps the whole sale at the checked price
+instead of slipping to lower levels.
+
+A sale is also proposed only if it does not realize a loss: proceeds after the sale
+fee must cover the sold share of the cost basis. With average cost `A` and fee rate
+`f`, this means roughly `bid * (1 - f) >= A`. The check uses the same integer
+rounding as the simulator and ledger (proceeds down, fee up, sold cost up), so the
+decision and the accounting agree on break-even cases. The fee rate is taken from the
+`config` row. The consequence is deliberate and visible in experiments: after a
+price drop the policy holds BTC indefinitely. There is no stop-loss yet. It does not top up
 a partial buy. Inventory below one step remains as dust. Open reservations block
 decisions. Missing, stale, invalid, or crossed quotes produce no order.
 

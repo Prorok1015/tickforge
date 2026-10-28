@@ -60,6 +60,19 @@ bool Simulator::available() const
     return tracker_.view().synchronized() && last_fresh_ns_ && now_ns_ - *last_fresh_ns_ <= config_.stale_after_ns;
 }
 
+std::optional<Level> Simulator::executable_level(Side side) const
+{
+    const auto& consumed = side == Side::buy ? consumed_asks_ : consumed_bids_;
+    // Common case: nothing consumed on this side, so the book's best level is exact.
+    if (consumed.empty()) return side == Side::buy ? book().best_ask() : book().best_bid();
+    for (const auto& level : side == Side::buy ? book().ask_depth() : book().bid_depth()) {
+        const auto found = consumed.find(level.price_atoms);
+        const auto used = found == consumed.end() ? 0 : found->second;
+        if (level.quantity_atoms > used) return Level{level.price_atoms, level.quantity_atoms - used};
+    }
+    return std::nullopt;
+}
+
 ExecutionResult Simulator::execute(const MarketOrder& order)
 {
     ExecutionResult result{order.id, OrderStatus::rejected, {}, order.quantity_atoms, ""};

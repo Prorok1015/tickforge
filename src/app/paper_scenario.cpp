@@ -58,7 +58,7 @@ PaperScenario load_paper_scenario(std::string_view path)
                 execution::validate_config(result.config);
             } else if (number == 4 && values.size() == 5 && values[0] == "threshold") {
                 result.strategy = strategy::ThresholdConfig{integer(values[1]), integer(values[2]),
-                    integer(values[3]), integer(values[4]), result.config.quantity_step_atoms};
+                    integer(values[3]), integer(values[4]), result.config.quantity_step_atoms, result.config.fee_ppm};
                 strategy::validate_config(*result.strategy);
             } else if (number > 3 && !result.strategy && values.size() == 6 && values[0] == "order") {
                 if (values[3] != "buy" && values[3] != "sell") throw std::runtime_error("expected buy or sell");

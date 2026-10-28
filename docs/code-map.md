@@ -217,8 +217,10 @@ See [paper trading](paper-trading.md) for units, scenario syntax, assumptions,
 example balances, PnL rules, and failure behavior.
 
 `strategy/strategy.hpp` defines a decision interface returning an optional market
-request from a value snapshot of quotes, event time, availability, and balances.
-`threshold.hpp/.cpp` implements an inventory-aware buy/sell threshold policy. The
+request from a value snapshot of quotes, event time, availability, balances, and
+position. The app fills the quotes from `Simulator::executable_level`, which nets out
+virtual consumption. `threshold.hpp/.cpp` implements an inventory-aware buy/sell
+threshold policy that never sells below its fee-adjusted cost basis. The
 app's existing `paper_command.cpp` also assembles the `strategy` command, invoking
 the policy after each simulator update and before submitting through OrderManager.
 `paper_scenario.*` validates either scripted orders or a threshold configuration.

@@ -132,7 +132,11 @@ void partial_sell()
     accounting::Account account(0, 200000000, 20000000000); // 2 BTC bought at 100.00
     OrderManager manager(account, simulator, settings);
     simulator.on_market_event(event(1, BookSnapshot{1, {{10000, 100000000}}, {{10100, 100000000}}}));
+    check(simulator.executable_level(Side::sell)->quantity_atoms == 100000000 &&
+          simulator.executable_level(Side::buy)->price_atoms == 10100, "untouched book is fully executable");
     const auto result = manager.submit({1, Side::sell, 150000000, 0});
+    check(!simulator.executable_level(Side::sell) && simulator.executable_level(Side::buy)->quantity_atoms == 100000000,
+          "consumed bids are no longer executable; asks are unaffected");
     check(result.result.status == OrderStatus::partially_filled && result.result.remaining_quantity_atoms == 50000000,
           "sell remainder must be cancelled when known bids are exhausted");
     check(account.balances().base_total == 100000000 && account.balances().base_reserved == 0 &&
