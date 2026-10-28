@@ -2,6 +2,7 @@
 #include "paper_reporter.hpp"
 #include <tickforge/accounting/valuation.hpp>
 #include <tickforge/core/amounts.hpp>
+#include <tickforge/strategy/mean_reversion.hpp>
 #include <tickforge/console/console.hpp>
 #include <algorithm>
 #include <cstdio>
@@ -131,6 +132,13 @@ std::string rate(std::int64_t ppm)
 std::string colored(std::int64_t value, const std::string& text)
 {
     return std::format("{}{}{}", value > 0 ? green : value < 0 ? red : "", text, reset);
+}
+
+// A configured duration in words: "10 min", "90 s".
+std::string window_text(std::int64_t ns)
+{
+    const auto seconds = ns / 1000000000;
+    return seconds % 60 == 0 ? std::format("{} min", seconds / 60) : std::format("{} s", seconds);
 }
 
 std::string clock_text(std::int64_t ns)
@@ -334,23 +342,33 @@ std::vector<std::string> LiveDashboard::status_panel() const
         else if (balances.base_total > 0)
             lines.push_back(std::format("{}▶{} Holding {} BTC; waiting for a sell price of at least {}", cyan, reset,
                 btc(balances.base_total), price(scenario_.strategy->sell_price_atoms)));
-        else if (relative)
-            lines.push_back(std::format("{}▶{} Waiting for a dip: the best ask {} must fall below the buy line", cyan, reset,
-                ask ? price(ask->price_atoms) : std::string("?")));
+        else if (const auto* learner = dynamic_cast<const strategy::MeanReversion*>(session.strategy()); learner && !learner->warm())
+            lines.push_back(std::format("{}▶{} Learning the market before trading (warm-up)", cyan, reset));
+        else if (learner && ask)
+            lines.push_back(std::format("{}▶{} Waiting for a dip: buy at ≤ {}{}{} · ask now {} ({} above)", cyan, reset,
+                bold, price(*learner->entry_price()), reset, price(ask->price_atoms),
+                price(std::max<std::int64_t>(0, ask->price_atoms - *learner->entry_price()))));
         else if (ask && ask->price_atoms > scenario_.strategy->buy_price_atoms)
             lines.push_back(std::format("{}▶{} Waiting to buy: the best ask {} is above our buy price {}", cyan, reset,
                 price(ask->price_atoms), price(scenario_.strategy->buy_price_atoms)));
         else
             lines.push_back(std::format("{}▶{} Ready to buy", cyan, reset));
     }
-    // The strategy's own view of the market: a warm-up, a moving average, a buy line.
-    if (const auto* policy = session.strategy(); policy && !policy->status().empty())
+    // The strategy's own view of the market: warm-up progress or its moving average.
+    if (const auto* learner = dynamic_cast<const strategy::MeanReversion*>(session.strategy())) {
+        if (learner->warm())
+            lines.push_back(std::format("  average of the last {}: {}", window_text(relative->window_ns),
+                price(*learner->average_price())));
+        else
+            lines.push_back("  " + learner->status());
+    } else if (const auto* policy = session.strategy(); policy && !policy->status().empty()) {
         lines.push_back("  " + policy->status());
+    }
     if (relative) {
-        lines.push_back(std::format("{}rules: buy {} below the {} average · sell {} above cost, never at a loss{}", dim,
-            rate(relative->entry_below_ppm), clock_text(relative->window_ns), rate(relative->take_profit_ppm), reset));
-        lines.push_back(std::format("{}       {} BTC per order · up to {} USDT per buy{}", dim, btc(relative->quantity_atoms),
-            usdt(relative->buy_budget_quote_atoms), reset));
+        lines.push_back(std::format("{}rules: buy {} below the {} average · sell {} above cost{}", dim,
+            rate(relative->entry_below_ppm), window_text(relative->window_ns), rate(relative->take_profit_ppm), reset));
+        lines.push_back(std::format("{}       never at a loss · {} BTC per order · up to {} USDT per buy{}", dim,
+            btc(relative->quantity_atoms), usdt(relative->buy_budget_quote_atoms), reset));
     } else {
         const auto& s = *scenario_.strategy;
         lines.push_back(std::format("{}rules: buy at ≤ {} · sell at ≥ {}, never below cost{}", dim,

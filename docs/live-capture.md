@@ -38,7 +38,8 @@ virtual funds. No order leaves the machine; there are still no keys.
   - **BOT**: what is the bot doing and why? Each open order in plain words: waiting
     to buy or sell at a price, our estimated place in the queue when we are the best
     price, or how far the market has to move to reach an order that it moved away
-    from. Then the strategy's rules: buy and sell prices, size and budget per order,
+    from. For `mean_reversion`, the warm-up progress, then its moving average and the
+    price at which it will buy. Then the strategy's rules: buy and sell prices, size and budget per order,
     order type, and the fee rate of each trade in percent.
   - **MARKET**: five price levels per side with size bars, our resting orders marked
     beside their level, and a note for our orders outside the shown levels.
