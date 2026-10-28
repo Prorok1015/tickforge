@@ -21,6 +21,16 @@ template<class Data> MarketEvent event(std::int64_t ordinal, Data data, std::int
 }
 PaperConfig config() { return {1000, 1, 1000000000, 1000000000, 100}; }
 
+// Zero latency: an accepted order is reported by the very next collect().
+OrderReport run(OrderManager& manager, const MarketOrder& order)
+{
+    if (auto rejected = manager.submit(order)) return *rejected;
+    auto reports = manager.collect();
+    check(reports.size() == 1 && reports.front().order.id == order.id && manager.in_flight() == 0,
+          "zero-latency execution must report exactly this order at once");
+    return reports.front();
+}
+
 void routing_and_liquidity()
 {
     auto settings = config();
@@ -29,7 +39,7 @@ void routing_and_liquidity()
     OrderManager manager(account, simulator, settings);
     simulator.on_market_event(event(1, BookSnapshot{100, {{9900, 200000000}, {10000, 100000000}},
         {{10200, 200000000}, {10100, 100000000}}}));
-    auto result = manager.submit({1, Side::buy, 250000000, 30000000000});
+    auto result = run(manager, {1, Side::buy, 250000000, 30000000000});
     check(result.result.status == OrderStatus::filled && result.result.fills.size() == 2,
           "buy must walk asks across levels");
     check(result.result.fills[0].price_atoms == 10100 && result.result.fills[0].quantity_atoms == 100000000 &&
@@ -37,23 +47,23 @@ void routing_and_liquidity()
           "asks must be consumed cheapest first");
     check(account.balances().quote_total == 974574600000 && account.balances().base_total == 250000000 &&
           account.balances().quote_reserved == 0, "buy costs, fees, BTC and released budget must reconcile");
-    result = manager.submit({2, Side::buy, 100000000, 20000000000});
+    result = run(manager, {2, Side::buy, 100000000, 20000000000});
     check(result.result.status == OrderStatus::partially_filled && result.result.remaining_quantity_atoms == 50000000,
           "second order must see previously consumed liquidity");
     check(account.balances().quote_total == 969469500000, "partial fill cost must be exact");
     auto before = account.balances();
-    result = manager.submit({3, Side::buy, 10000000, 2000000000});
+    result = run(manager, {3, Side::buy, 10000000, 2000000000});
     check(result.result.status == OrderStatus::cancelled && result.result.fills.empty() && account.balances() == before,
           "exhausted asks must not refill per request");
     simulator.on_market_event(event(2, Trade{1, 100000000}));
-    check(manager.submit({4, Side::buy, 10000000, 2000000000}).result.fills.empty(), "trades must not replenish book depth");
+    check(run(manager, {4, Side::buy, 10000000, 2000000000}).result.fills.empty(), "trades must not replenish book depth");
     simulator.on_market_event(event(3, BookUpdate{101, 101, {{10000, 100000000}}, {}}));
-    check(manager.submit({5, Side::buy, 10000000, 2000000000}).result.fills.empty(), "bid updates must not refill asks");
+    check(run(manager, {5, Side::buy, 10000000, 2000000000}).result.fills.empty(), "bid updates must not refill asks");
     simulator.on_market_event(event(4, BookUpdate{102, 102, {}, {{10200, 100000000}}}));
-    result = manager.submit({6, Side::buy, 100000000, 20000000000});
+    result = run(manager, {6, Side::buy, 100000000, 20000000000});
     check(result.result.status == OrderStatus::filled && result.result.fills[0].price_atoms == 10200,
           "an explicit ask update replenishes only that level");
-    result = manager.submit({7, Side::sell, 150000000, 0});
+    result = run(manager, {7, Side::sell, 150000000, 0});
     check(result.result.status == OrderStatus::filled && result.result.fills.size() == 2 &&
           result.result.fills[0].price_atoms == 10000 && result.result.fills[1].price_atoms == 9900,
           "sell must walk bids highest first");
@@ -68,13 +78,13 @@ void budget_and_rounding()
     accounting::Account account(100000000, 0, 0);
     OrderManager manager(account, simulator, settings);
     simulator.on_market_event(event(1, BookSnapshot{1, {{10000, 100000000}}, {{10100, 100000000}}}));
-    const auto result = manager.submit({1, Side::buy, 2000, 101101});
+    const auto result = run(manager, {1, Side::buy, 2000, 101101});
     check(result.result.status == OrderStatus::partially_filled && result.result.fills[0].quantity_atoms == 1000 &&
           result.result.fills[0].quote_atoms == 101000 && result.result.fills[0].fee_quote_atoms == 101,
           "buy budget must include fees and respect quantity step");
     check(account.balances().quote_total == 99898899 && account.balances().quote_reserved == 0, "budget accounting");
     const auto before = account.balances();
-    check(manager.submit({2, Side::buy, 1000, 1}).result.status == OrderStatus::cancelled &&
+    check(run(manager, {2, Side::buy, 1000, 1}).result.status == OrderStatus::cancelled &&
           account.balances() == before, "unaffordable lot must not create a fill or retain a reservation");
 
     settings.quantity_step_atoms = 1;
@@ -95,27 +105,27 @@ void risk_and_freshness()
     Simulator simulator(settings);
     accounting::Account account(10000000000, 0, 0);
     OrderManager manager(account, simulator, settings);
-    check(!manager.submit({1, Side::buy, 100000, 100000000}).accepted, "no snapshot must block orders");
+    check(!run(manager, {1, Side::buy, 100000, 100000000}).accepted, "no snapshot must block orders");
     simulator.on_market_event(event(1, BookSnapshot{100, {{10000, 100000000}}, {{10100, 100000000}}}));
     const auto original = account.balances();
-    check(!manager.submit({2, Side::sell, 100000, 0}).accepted, "no short selling");
-    check(!manager.submit({3, Side::buy, 101000, 100000000}).accepted, "order size risk");
-    check(!manager.submit({4, Side::buy, 999, 100000000}).accepted, "quantity step risk");
-    check(!manager.submit({5, Side::buy, 100000, 10000000001}).accepted, "insufficient USDT");
+    check(!run(manager, {2, Side::sell, 100000, 0}).accepted, "no short selling");
+    check(!run(manager, {3, Side::buy, 101000, 100000000}).accepted, "order size risk");
+    check(!run(manager, {4, Side::buy, 999, 100000000}).accepted, "quantity step risk");
+    check(!run(manager, {5, Side::buy, 100000, 10000000001}).accepted, "insufficient USDT");
     check(account.balances() == original, "risk rejection must not reserve or spend");
-    check(manager.submit({6, Side::buy, 100000, 100000000}).accepted, "valid order accepted");
+    check(run(manager, {6, Side::buy, 100000, 100000000}).accepted, "valid order accepted");
     const auto before = account.balances();
-    check(!manager.submit({7, Side::buy, 100000, 100000000}).accepted, "position limit uses requested maximum quantity");
-    check(!manager.submit({6, Side::buy, 100000, 100000000}).accepted && account.balances() == before,
+    check(!run(manager, {7, Side::buy, 100000, 100000000}).accepted, "position limit uses requested maximum quantity");
+    check(!run(manager, {6, Side::buy, 100000, 100000000}).accepted && account.balances() == before,
           "duplicate order ID must not execute twice");
     simulator.on_market_event(event(2, Trade{10100, 1}, 101));
-    check(!simulator.available() && !manager.submit({8, Side::sell, 100000, 0}).accepted, "stale depth must block decisions");
+    check(!simulator.available() && !run(manager, {8, Side::sell, 100000, 0}).accepted, "stale depth must block decisions");
     simulator.on_market_event(event(3, BookUpdate{99, 100, {}, {}}, 102));
     check(!simulator.available(), "stale duplicate range must not refresh time");
     simulator.on_market_event(event(4, BookUpdate{101, 101, {}, {}}, 103));
     check(simulator.available(), "valid next range refreshes depth time");
     simulator.on_market_event(event(5, BookUpdate{103, 103, {}, {}}, 104));
-    check(!simulator.available() && !manager.submit({9, Side::sell, 100000, 0}).accepted, "gap blocks orders");
+    check(!simulator.available() && !run(manager, {9, Side::sell, 100000, 0}).accepted, "gap blocks orders");
     simulator.on_market_event(event(6, BookSnapshot{200, {{10000, 100000}}, {{10100, 100000}}, true}, 105));
     check(!simulator.available(), "live snapshot must still wait for a bridge");
     simulator.on_market_event(event(7, BookUpdate{201, 201, {}, {}}, 106));
@@ -134,7 +144,7 @@ void partial_sell()
     simulator.on_market_event(event(1, BookSnapshot{1, {{10000, 100000000}}, {{10100, 100000000}}}));
     check(simulator.executable_level(Side::sell)->quantity_atoms == 100000000 &&
           simulator.executable_level(Side::buy)->price_atoms == 10100, "untouched book is fully executable");
-    const auto result = manager.submit({1, Side::sell, 150000000, 0});
+    const auto result = run(manager, {1, Side::sell, 150000000, 0});
     check(!simulator.executable_level(Side::sell) && simulator.executable_level(Side::buy)->quantity_atoms == 100000000,
           "consumed bids are no longer executable; asks are unaffected");
     check(result.result.status == OrderStatus::partially_filled && result.result.remaining_quantity_atoms == 50000000,
@@ -145,41 +155,46 @@ void partial_sell()
     check(account.position() == accounting::Position{10000000000, -10000000},
           "selling at cost loses exactly the fee; half the cost remains");
     simulator.on_market_event(event(2, BookSnapshot{2, {{10000, 100000000}}, {{10100, 100000000}}}));
-    check(manager.submit({2, Side::sell, 100000000, 0}).result.status == OrderStatus::filled &&
+    check(run(manager, {2, Side::sell, 100000000, 0}).result.status == OrderStatus::filled &&
           account.balances().base_total == 0, "new snapshot replenishes known liquidity");
     check(account.position() == accounting::Position{0, -20000000}, "closing the position removes all cost");
     simulator.on_market_event(event(3, BookSnapshot{3, {}, {}}));
     const auto before = account.balances();
-    check(manager.submit({3, Side::buy, 1, 1}).result.status == OrderStatus::cancelled && account.balances() == before,
+    check(run(manager, {3, Side::buy, 1, 1}).result.status == OrderStatus::cancelled && account.balances() == before,
           "empty book must not invent an execution price");
 }
 
-class UncertainExecution final : public Execution {
+// Test executions answer each submitted order with a scripted result.
+class ScriptedExecution : public Execution {
 public:
     bool available() const override { return true; }
-    ExecutionResult execute(const MarketOrder&) override { throw std::runtime_error("result unknown"); }
+    void submit(const MarketOrder& order) override { reports_.push_back({answer(order), 0, 0}); }
+    std::vector<ExecutionReport> take_reports() override { return std::exchange(reports_, {}); }
+private:
+    virtual ExecutionResult answer(const MarketOrder& order) = 0;
+    std::vector<ExecutionReport> reports_;
 };
-class MalformedExecution final : public Execution {
-public:
-    bool available() const override { return true; }
-    ExecutionResult execute(const MarketOrder& order) override
+class UncertainExecution final : public ScriptedExecution {
+    ExecutionResult answer(const MarketOrder&) override { throw std::runtime_error("result unknown"); }
+};
+class MalformedExecution final : public ScriptedExecution {
+    ExecutionResult answer(const MarketOrder& order) override
     { return {order.id, OrderStatus::filled, {}, 0, "invalid empty filled report"}; }
 };
-
-class DuplicateExecution final : public Execution {
-public:
-    bool available() const override { return true; }
-    ExecutionResult execute(const MarketOrder& order) override
+class DuplicateExecution final : public ScriptedExecution {
+    ExecutionResult answer(const MarketOrder& order) override
     {
         const Fill fill{1, order.id, order.side, 100, 1, 1, 0};
         return {order.id, OrderStatus::filled, {fill, fill}, 0, "duplicate confirmed receipt"};
     }
 };
-class RejectedExecution final : public Execution {
-public:
-    bool available() const override { return true; }
-    ExecutionResult execute(const MarketOrder& order) override
+class RejectedExecution final : public ScriptedExecution {
+    ExecutionResult answer(const MarketOrder& order) override
     { return {order.id, OrderStatus::rejected, {}, order.quantity_atoms, "confirmed rejection"}; }
+};
+class StrangerExecution final : public ScriptedExecution {
+    ExecutionResult answer(const MarketOrder& order) override
+    { return {order.id + 100, OrderStatus::rejected, {}, order.quantity_atoms, "report for an unknown order"}; }
 };
 
 void uncertain_results()
@@ -188,25 +203,30 @@ void uncertain_results()
     accounting::Account account(100, 0, 0);
     UncertainExecution execution;
     OrderManager manager(account, execution, settings);
-    rejects([&] { manager.submit({1, Side::buy, 1, 10}); });
+    rejects([&] { run(manager, {1, Side::buy, 1, 10}); });
     check(account.balances().quote_reserved == 10 && account.balances().quote_total == 100,
           "unknown result must retain its reservation");
     MalformedExecution malformed;
     OrderManager other(account, malformed, settings);
-    rejects([&] { other.submit({2, Side::buy, 1, 10}); });
+    rejects([&] { run(other, {2, Side::buy, 1, 10}); });
     check(account.balances().quote_reserved == 20 && account.balances().base_total == 0,
           "malformed result must not silently release reserves or invent BTC");
     accounting::Account other_account(100, 0, 0);
     DuplicateExecution duplicate;
     OrderManager duplicate_manager(other_account, duplicate, settings);
-    const auto report = duplicate_manager.submit({1, Side::buy, 1, 10});
+    const auto report = run(duplicate_manager, {1, Side::buy, 1, 10});
     check(report.result.fills.size() == 1 && other_account.balances().base_total == 1 &&
           other_account.balances().quote_total == 99, "duplicate receipts must not duplicate journal fills or money");
     RejectedExecution rejected;
     OrderManager rejected_manager(other_account, rejected, settings);
     const auto before = other_account.balances();
-    check(rejected_manager.submit({2, Side::buy, 1, 10}).result.status == OrderStatus::rejected &&
+    check(run(rejected_manager, {2, Side::buy, 1, 10}).result.status == OrderStatus::rejected &&
           other_account.balances() == before, "confirmed rejection releases the whole reservation");
+    StrangerExecution stranger;
+    OrderManager stranger_manager(other_account, stranger, settings);
+    rejects([&] { run(stranger_manager, {3, Side::buy, 1, 10}); });
+    check(other_account.balances().quote_reserved == 10 && stranger_manager.in_flight() == 1,
+          "a report for an unknown order must not release the real order's reservation");
 }
 }
 

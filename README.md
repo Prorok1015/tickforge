@@ -134,8 +134,8 @@ Checked items below are implemented; unchecked items remain planned.
 ### 4. More realistic execution
 
 - [ ] Model order submission and cancellation delays.
-- [ ] Make the execution interface asynchronous: orders live across market events
-  (submitted, accepted, partially filled, terminal) instead of returning one result.
+- [x] Make the execution interface asynchronous: orders are submitted, and their
+  confirmed terminal results are reported later instead of returned at once.
 - [ ] Add limit orders, partial fills, and queue assumptions.
 - [ ] Compare results under different execution assumptions.
 - [x] Block decisions on stale or invalid depth.

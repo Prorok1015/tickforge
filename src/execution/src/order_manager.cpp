@@ -8,7 +8,7 @@ namespace tickforge::execution {
 OrderManager::OrderManager(accounting::Account& account, Execution& execution, PaperConfig config)
     : account_(account), execution_(execution), config_(config) { validate_config(config); }
 
-OrderReport OrderManager::submit(const MarketOrder& order)
+std::optional<OrderReport> OrderManager::submit(const MarketOrder& order)
 {
     const auto reject = [&](std::string reason) {
         return OrderReport{order, false, {order.id, OrderStatus::rejected, {}, order.quantity_atoms, std::move(reason)},
@@ -27,11 +27,26 @@ OrderReport OrderManager::submit(const MarketOrder& order)
             return reject("maximum BTC position exceeded");
         account_.reserve(order);
     } catch (const std::runtime_error& error) { return reject(error.what()); }
-    const auto reserved = account_.balances();
-    // If execute throws, the result is uncertain: keep the reservation and stop.
-    auto result = execution_.execute(order);
-    if (result.order_id != order.id || result.remaining_quantity_atoms < 0 ||
-        result.remaining_quantity_atoms > order.quantity_atoms)
+    pending_.emplace(order.id, Pending{order, account_.balances()});
+    // If submit throws, the result is uncertain: keep the reservation and stop.
+    execution_.submit(order);
+    return std::nullopt;
+}
+
+std::vector<OrderReport> OrderManager::collect()
+{
+    std::vector<OrderReport> reports;
+    for (auto& report : execution_.take_reports()) reports.push_back(commit(std::move(report)));
+    return reports;
+}
+
+OrderReport OrderManager::commit(ExecutionReport report)
+{
+    auto& result = report.result;
+    const auto found = pending_.find(result.order_id);
+    if (found == pending_.end()) throw std::runtime_error("execution reported an unknown order; reservations retained");
+    const auto order = found->second.order;
+    if (result.remaining_quantity_atoms < 0 || result.remaining_quantity_atoms > order.quantity_atoms)
         throw std::runtime_error("invalid execution result; reservation retained");
     auto candidate = account_;
     std::int64_t filled = 0;
@@ -55,6 +70,9 @@ OrderReport OrderManager::submit(const MarketOrder& order)
     candidate.release(order.id);
     account_ = std::move(candidate);
     result.fills = std::move(confirmed);
-    return {order, true, std::move(result), reserved, account_.balances(), account_.position()};
+    const auto reserved = found->second.reserved;
+    pending_.erase(found);
+    return {order, true, std::move(result), reserved, account_.balances(), account_.position(),
+            report.executed_ns, report.reported_ns};
 }
 } // namespace tickforge::execution

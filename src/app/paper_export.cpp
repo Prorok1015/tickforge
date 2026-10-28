@@ -63,19 +63,19 @@ PaperExport::PaperExport(std::string_view prefix)
         "quote_atoms,fee_quote_atoms\n");
 }
 
-void PaperExport::order(const MarketEvent& event, std::string_view signal, const execution::OrderReport& report)
+void PaperExport::order(const EventTime& submitted, std::string_view signal, const execution::OrderReport& report)
 {
     const auto& result = report.result;
     std::int64_t fees = 0;
     for (const auto& fill : result.fills) {
         fees = amount_add(fees, fill.fee_quote_atoms);
-        write(fills_.get(), std::format("{},{},{},{},{},{},{},{},{}\n", event.time.ordinal, event.time.receive_elapsed_ns,
+        write(fills_.get(), std::format("{},{},{},{},{},{},{},{},{}\n", submitted.ordinal, submitted.receive_elapsed_ns,
             fill.order_id, fill.id, side_name(fill.side), fill.price_atoms, fill.quantity_atoms, fill.quote_atoms,
             fill.fee_quote_atoms));
     }
     const auto& balances = report.final_balances;
     write(orders_.get(), std::format("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
-        event.time.ordinal, event.time.receive_elapsed_ns, report.order.id, signal, side_name(report.order.side),
+        submitted.ordinal, submitted.receive_elapsed_ns, report.order.id, signal, side_name(report.order.side),
         report.order.quantity_atoms, report.order.max_spend_quote_atoms, report.accepted ? 1 : 0,
         status_name(result.status), report.order.quantity_atoms - result.remaining_quantity_atoms,
         result.remaining_quantity_atoms, result.fills.size(), fees, balances.quote_total, balances.base_total,

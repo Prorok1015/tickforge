@@ -194,7 +194,8 @@ Binance adapter only reads public depth and metadata. It has no account access.
 
 An order-execution adapter would send orders/cancellations and consume order-status
 and fill reports. It is a separate responsibility, not implemented here. The paper
-command uses a synchronous execution interface in the current stage. The
+command uses an asynchronous execution interface: orders are submitted, and their
+confirmed results are reported later. The
 first implementation is a local simulator, driven by scripted requests or the
 offline strategy command. A real venue execution adapter would require an explicit
 later stage, authentication, reconciliation, and handling uncertain request results.
@@ -205,11 +206,13 @@ Do not add real execution to the public market-data adapter implicitly.
 `accounting/account.hpp/.cpp` owns total/reserved/available USDT and BTC, order
 reservations, receipt deduplication, average cost basis, and realized PnL.
 `accounting/valuation.hpp/.cpp` marks the position at a price: market value,
-unrealized/total PnL, equity, and average cost. They are pure functions of the ledger. `execution/execution.hpp` defines the
-synchronous interface and explicit paper settings. `simulator.hpp/.cpp` consumes
-replay events, guards book freshness, and simulates fills using separate virtual
-liquidity counters. `order_manager.hpp/.cpp` performs risk checks, reserves funds,
-calls the executor, validates confirmed results, and commits them to the account.
+unrealized/total PnL, equity, and average cost. They are pure functions of the ledger.
+`execution/execution.hpp` defines the asynchronous interface (`submit`, then
+`take_reports` with execution and report times) and explicit paper settings.
+`simulator.hpp/.cpp` consumes replay events, guards book freshness, and simulates
+fills using separate virtual liquidity counters. `order_manager.hpp/.cpp` performs
+risk checks, reserves funds, and submits; `collect()` later validates confirmed
+results and commits them to the account.
 
 The app's `paper_command.cpp` connects these pieces; `paper_scenario.*` reads
 experimental inputs, `paper_reporter.*` prints the operation journal, and

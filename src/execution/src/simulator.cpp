@@ -4,6 +4,7 @@
 #include <limits>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 
 namespace tickforge::execution {
 namespace {
@@ -58,6 +59,16 @@ void Simulator::on_market_event(const MarketEvent& event)
 bool Simulator::available() const
 {
     return tracker_.view().synchronized() && last_fresh_ns_ && now_ns_ - *last_fresh_ns_ <= config_.stale_after_ns;
+}
+
+void Simulator::submit(const MarketOrder& order)
+{
+    reports_.push_back({execute(order), now_ns_, now_ns_});
+}
+
+std::vector<ExecutionReport> Simulator::take_reports()
+{
+    return std::exchange(reports_, {});
 }
 
 std::optional<Level> Simulator::executable_level(Side side) const

@@ -1,5 +1,6 @@
 #pragma once
 #include <tickforge/core/orders.hpp>
+#include <vector>
 
 namespace tickforge::execution {
 
@@ -11,13 +12,23 @@ struct PaperConfig {
     std::int64_t stale_after_ns = 5000000000;
 };
 
-// Initial synchronous, zero-latency contract. Return only confirmed terminal
-// results. A thrown/uncertain result must NOT automatically release reservations.
+// A confirmed terminal result and when it happened on the session timeline
+// (recorded monotonic receive offsets): executed at the venue, then reported to us.
+struct ExecutionReport {
+    ExecutionResult result;
+    std::int64_t executed_ns;
+    std::int64_t reported_ns;
+};
+
+// Asynchronous contract: submit() hands over an order; its confirmed terminal result
+// arrives later, exactly once, through take_reports(). A throw from either call means
+// the outcome is uncertain: reservations must NOT be released automatically.
 class Execution {
 public:
     virtual ~Execution() = default;
     virtual bool available() const = 0;
-    virtual ExecutionResult execute(const MarketOrder& order) = 0;
+    virtual void submit(const MarketOrder& order) = 0;
+    virtual std::vector<ExecutionReport> take_reports() = 0;
 };
 
 void validate_config(const PaperConfig& config);

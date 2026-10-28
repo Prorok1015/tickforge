@@ -22,7 +22,7 @@ struct PaperTotals {
 class PaperExport {
 public:
     explicit PaperExport(std::string_view prefix);
-    void order(const MarketEvent& event, std::string_view signal, const execution::OrderReport& report);
+    void order(const EventTime& submitted, std::string_view signal, const execution::OrderReport& report);
     void complete(std::string_view command, std::string_view session, std::string_view scenario_path,
                   const PaperScenario& scenario, const accounting::Account& account,
                   const PaperTotals& totals, std::optional<Mark> mark);

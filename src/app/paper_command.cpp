@@ -8,6 +8,8 @@
 #include <tickforge/console/console.hpp>
 #include <format>
 #include <fstream>
+#include <map>
+#include <utility>
 #include <stdexcept>
 #include <string>
 
@@ -55,19 +57,33 @@ void paper_session(std::string_view session_path, std::string_view scenario_path
             : std::format("sell at market when position value is {} ppm below cost", scenario.strategy->stop_loss_ppm),
         scenario.strategy->cooldown_ns == 0 ? std::string("off")
             : std::format("no buys for {} ns after a stop-loss closes the position", scenario.strategy->cooldown_ns)));
-    const auto submit = [&](const MarketEvent& event, const MarketOrder& order, std::string_view signal) {
-        const auto report = manager.submit(order);
+    const auto record = [&](const execution::OrderReport& report, const EventTime& submitted, std::string_view signal) {
         paper_order(report);
-        if (exporter) exporter->order(event, signal, report);
+        if (exporter) exporter->order(submitted, signal, report);
         if (report.result.status == OrderStatus::rejected) ++totals.rejected;
         totals.fills += report.result.fills.size();
         for (const auto& fill : report.result.fills) totals.fees = amount_add(totals.fees, fill.fee_quote_atoms);
+    };
+    // Submission time and signal of accepted orders until their reports arrive.
+    std::map<std::int64_t, std::pair<EventTime, std::string_view>> in_flight;
+    const auto collect = [&] {
+        for (const auto& report : manager.collect()) {
+            const auto found = in_flight.find(report.order.id);
+            if (found == in_flight.end()) throw std::runtime_error("report for an order this run did not submit");
+            record(report, found->second.first, found->second.second);
+            in_flight.erase(found);
+        }
+    };
+    const auto submit = [&](const MarketEvent& event, const MarketOrder& order, std::string_view signal) {
         ++totals.requests;
-        ++next;
+        if (const auto rejected = manager.submit(order)) record(*rejected, event.time, signal);
+        else in_flight.emplace(order.id, std::pair{event.time, signal});
+        collect();
     };
     replay(input, [&](const MarketEvent& event) {
         ++totals.events;
         simulator.on_market_event(event);
+        collect();
         paper_market(event, simulator.available());
         // Recordings end with a shutdown reset, so keep the last trusted bid for valuation.
         if (const auto bid = simulator.book().best_bid(); bid && simulator.available())
@@ -90,7 +106,7 @@ void paper_session(std::string_view session_path, std::string_view scenario_path
             return;
         }
         while (next < scenario.orders.size() && scenario.orders[next].after_ordinal == event.time.ordinal) {
-            submit(event, scenario.orders[next].order, "script");
+            submit(event, scenario.orders[next++].order, "script");
         }
     });
     if (!automatic && next != scenario.orders.size()) throw std::runtime_error("scenario references an event beyond the recorded session");

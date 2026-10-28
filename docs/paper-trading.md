@@ -104,8 +104,10 @@ flowchart LR
 The account is a starting point for reuse with future real execution reports. It
 currently models one base/quote pair, nonnegative balances, and USDT fees. Durable
 ledger persistence, multi-asset fees, rebates, deposits/withdrawals, exchange-state
-reconciliation, and asynchronous real execution are not implemented. The initial
-`Execution` contract is synchronous and returns confirmed terminal results only.
+reconciliation, and real execution are not implemented. The `Execution` contract is
+asynchronous: `submit` hands over an order, and its confirmed terminal result is
+delivered once, later, through `take_reports`. The manager commits only such results;
+an unknown or inconsistent report keeps reservations and aborts the run.
 
 ## Scenario file v1
 
@@ -170,13 +172,17 @@ are not fully emulated in this stage.
 3. Reserve the entire buy budget from available USDT, or the sell quantity from
    available BTC. Reservation reduces available funds without changing totals.
    A budget exceeding available cash is rejected even if expected fills cost less.
-4. Submit to the synchronous execution interface. Buys walk asks cheapest first;
+4. Submit to the execution interface. Buys walk asks cheapest first;
    sells walk bids highest first. No last-trade price is used as an execution quote.
    Fill in configured quantity-step multiples; buy sizing includes rounded fees.
 5. Apply confirmed fills: purchases debit notional plus fee and credit BTC; sales
    debit BTC and credit proceeds minus fee. Only the executed part changes totals.
 6. Cancel any unfilled remainder immediately and release its unused reservation.
    `partially_filled` is terminal here: the remaining quantity is cancelled.
+
+Steps 1-4 happen at submission. Steps 5-6 happen when the manager collects the
+execution report. With the current zero-latency simulator both occur within the
+event that submitted the order.
 
 No shorts, leverage, limit orders, resting orders, simulated delays, or daily-loss
 limits are implemented. A fresh sequence is not enough on its own: depth is
