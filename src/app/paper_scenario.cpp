@@ -189,11 +189,14 @@ PaperScenario load_paper_scenario(std::string_view path, const std::vector<std::
     if (strategy_table) {
         const Section strategy(*strategy_table, "strategy.", {"type", "buy_below", "sell_above", "quantity",
             "buy_budget", "stop_loss", "cooldown"});
-        if (strategy.text("type") != "threshold") fail("strategy.type", "only \"threshold\" is available");
+        result.strategy_type = strategy.text("type");
+        if (result.strategy_type != "threshold" && result.strategy_type != "threshold_maker")
+            fail("strategy.type", "must be \"threshold\" (market orders) or \"threshold_maker\" (limit orders)");
         result.strategy = strategy::ThresholdConfig{strategy.get("buy_below", parse_price),
             strategy.get("sell_above", parse_price), strategy.get("quantity", parse_quantity),
             strategy.get("buy_budget", parse_quote), result.config.quantity_step_atoms, result.config.fee_ppm,
-            strategy.get_or("stop_loss", parse_percent_ppm, "0%"), strategy.get_or("cooldown", parse_duration_ns, "0s")};
+            strategy.get_or("stop_loss", parse_percent_ppm, "0%"), strategy.get_or("cooldown", parse_duration_ns, "0s"),
+            result.config.maker_fee_ppm};
         try {
             strategy::validate_config(*result.strategy);
         } catch (const std::runtime_error& error) {

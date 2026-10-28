@@ -41,17 +41,53 @@ of current bid/ask, availability, event time, confirmed balances, and the positi
 this account: recorded size minus liquidity consumed by earlier virtual orders. The view
 also carries the account risk state (`buys_allowed`, `sells_allowed`, see
 [risk limits](paper-trading.md#risk-limits)); the threshold policy proposes no buy in
-reduce-only and nothing when halted. It invokes
-`Strategy::on_market` once and submits at most one proposed market order through
-the existing risk/reservation/execution path. It prints the triggering event and
-side before the request, fills, fees, and resulting balances. The next decision
-sees the confirmed result, including partial fills or rejected requests.
+reduce-only and nothing when halted. The view also lists the account's **open
+orders** (in flight or resting) with their filled quantity and whether a cancel was
+requested. The app invokes `Strategy::on_market` once per event and carries out the
+returned **actions** in order:
+
+| Action | Meaning |
+| --- | --- |
+| `Place{order, signal}` | submit a market or limit order through the risk/reservation/execution path |
+| `Cancel{order_id}` | request a cancel; it may arrive after the order filled |
+| `Notice{text}` | explain a decision in the journal (for example a cooldown start) |
+
+The journal prints the triggering event and signal before each request, then fills,
+fees, and resulting balances. The next decision sees the confirmed result, including
+partial fills, resting orders, or rejected requests.
 
 `strategy/strategy.hpp` defines that interface and value snapshot. It has no file,
-console, socket, or simulator dependency. `threshold.hpp` and `threshold.cpp`
-implement the first policy. `tickforge_strategy` has its own directory and CMake
+console, socket, or simulator dependency. `rules.hpp/.cpp` holds the rules both
+policies share: break-even selling with ledger-identical rounding, the stop-loss
+trigger, the post-stop cooldown, and the usable-quote check. `threshold.*` implements
+the market-order policy and `threshold_maker.*` the limit-order policy. `tickforge_strategy` has its own directory and CMake
 target and depends only on core types and accounting balances. The application
 assembles these components; changing a strategy does not change the ledger.
+
+## Two policies: `threshold` and `threshold_maker`
+
+`[strategy] type` selects one of two classes with the same configuration keys. They
+differ in logic rather than in a parameter, so they are separate classes instead of one
+class with a flag; their shared rules live in `rules.*`.
+
+| | `threshold` | `threshold_maker` |
+| --- | --- | --- |
+| Entry | market buy when ask <= `buy_below` | post-only limit bid at min(`buy_below`, best bid), resting |
+| Exit | market sell when bid >= `sell_above` and not at a loss | post-only limit ask at max(`sell_above`, break-even after the maker fee, best bid + 1 tick) |
+| Fees | taker on every fill | maker on resting fills |
+| Partial entry | the remainder is cancelled at once | a still-resting bid is cancelled once any BTC is held |
+| Stop-loss | market sell | cancel the resting ask first (its BTC is reserved), then market sell |
+| State | balances only | balances plus its open orders |
+
+The maker never chases: a resting order stays until it fills, the position changes, or
+the risk guard cancels it. The bid is never above the best bid and the ask never at or
+below it, so post-only never refuses. One tick is one price atom (0.01 USDT, the
+BTCUSDT tick). Every fill of the maker waits for real trades to reach it through the
+[queue model](paper-trading.md#limit-orders-and-the-queue-model), so the maker fills
+less often and at worse moments (adverse selection) than its prices suggest.
+
+Both policies read the account's balances and position, so a run must have exactly one
+strategy. Strategy-owned sub-ledgers are planned with multi-strategy accounts.
 
 ## Configuration
 

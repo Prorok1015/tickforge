@@ -21,6 +21,7 @@ struct PaperScenario {
     std::vector<ScriptOrder> orders;
     std::vector<ScriptCancel> cancels;  // sent after the orders of the same event
     std::optional<strategy::ThresholdConfig> strategy;
+    std::string strategy_type;          // "threshold" (market orders) or "threshold_maker" (limit orders)
     std::vector<std::string> overrides; // "key=value" as given, applied before validation
 };
 // Overrides replace or add scalar values by dotted key, e.g. "strategy.stop_loss=0.3%".

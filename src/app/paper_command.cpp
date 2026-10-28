@@ -6,10 +6,12 @@
 #include <tickforge/core/amounts.hpp>
 #include <tickforge/accounting/valuation.hpp>
 #include <tickforge/execution/simulator.hpp>
+#include <tickforge/strategy/threshold_maker.hpp>
 #include <tickforge/console/console.hpp>
 #include <format>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <utility>
 #include <stdexcept>
 #include <string>
@@ -36,8 +38,9 @@ void paper_session(const PaperOptions& options)
     const auto scenario = load_paper_scenario(scenario_path, options.overrides);
     if (automatic != scenario.strategy.has_value())
         throw std::runtime_error("strategy command requires a [strategy] section; paper command requires [[orders]] instead");
-    std::optional<strategy::Threshold> algorithm;
-    if (scenario.strategy) algorithm.emplace(*scenario.strategy);
+    std::unique_ptr<strategy::Strategy> algorithm;
+    if (scenario.strategy_type == "threshold_maker") algorithm = std::make_unique<strategy::ThresholdMaker>(*scenario.strategy);
+    else if (scenario.strategy) algorithm = std::make_unique<strategy::Threshold>(*scenario.strategy);
     std::ifstream input{std::string(session_path)};
     if (!input) throw std::runtime_error(std::format("cannot open session '{}'", session_path));
     accounting::Account account(scenario.initial_quote_atoms, scenario.initial_base_atoms, scenario.initial_base_cost_atoms);
@@ -52,12 +55,17 @@ void paper_session(const PaperOptions& options)
     std::optional<PaperExport> exporter;
     if (!report_prefix.empty()) exporter.emplace(report_prefix);
     paper_header(session_path, scenario_path, scenario);
+    const bool maker = scenario.strategy_type == "threshold_maker";
     if (algorithm) write_console(std::format(
-        "Strategy  | threshold | buy ask <= {} USDT | sell bid >= {} USDT, never below fee-adjusted cost\n"
+        "{}"
         "Stop-loss | {}\n"
         "Cooldown  | {}\n"
-        "Decision  | once per event, confirmed inventory, at most one market request\n\n",
-        price_text(scenario.strategy->buy_price_atoms), price_text(scenario.strategy->sell_price_atoms),
+        "Decision  | once per event, confirmed inventory and open orders\n\n",
+        maker ? std::format("Strategy  | threshold_maker | post-only bid at <= {} USDT | post-only ask at >= {} USDT, "
+                            "never below cost after the maker fee\n",
+                            price_text(scenario.strategy->buy_price_atoms), price_text(scenario.strategy->sell_price_atoms))
+              : std::format("Strategy  | threshold | buy ask <= {} USDT | sell bid >= {} USDT, never below fee-adjusted cost\n",
+                            price_text(scenario.strategy->buy_price_atoms), price_text(scenario.strategy->sell_price_atoms)),
         scenario.strategy->stop_loss_ppm == 0 ? std::string("off")
             : std::format("sell at market when position value is {} ppm below cost", scenario.strategy->stop_loss_ppm),
         scenario.strategy->cooldown_ns == 0 ? std::string("off")
@@ -134,19 +142,28 @@ void paper_session(const PaperOptions& options)
         risk.observe(event.time.receive_elapsed_ns, equity);
         note_risk(event.time);
         if (algorithm) {
-            const auto order = algorithm->on_market({event.time, simulator.available(),
+            std::vector<strategy::OpenOrder> open;
+            for (const auto& order : manager.open_orders())
+                open.push_back({order.order, order.filled_quantity_atoms, order.cancel_requested});
+            const auto actions = algorithm->on_market({event.time, simulator.available(),
                 simulator.executable_level(Side::sell), simulator.executable_level(Side::buy),
-                account.balances(), account.position(), risk.buys_allowed(), risk.sells_allowed()});
-            if (const auto until = algorithm->started_cooldown_until())
-                write_console(std::format("Cooldown  | event #{} | stop-loss closed the position; no buys until elapsed={} ns\n",
-                    event.time.ordinal, *until));
-            if (order) {
-                const auto signal = algorithm->last_signal();
-                write_console(std::format("Signal    | event #{} | {}\n", event.time.ordinal,
-                    signal == strategy::Signal::buy ? "BUY ask threshold reached"
-                    : signal == strategy::Signal::stop_loss ? "STOP-LOSS position value fell below the limit"
-                    : "SELL bid threshold reached"));
-                submit(event, *order, signal_name(signal));
+                account.balances(), account.position(), risk.buys_allowed(), risk.sells_allowed(), std::move(open)});
+            for (const auto& action : actions) {
+                if (const auto* notice = std::get_if<strategy::Notice>(&action)) {
+                    write_console(std::format("Notice    | event #{} | {}\n", event.time.ordinal, notice->text));
+                } else if (const auto* cancel = std::get_if<strategy::Cancel>(&action)) {
+                    write_console(std::format("Cancel    | event #{} | order #{} | {}\n", event.time.ordinal, cancel->order_id,
+                        manager.cancel(cancel->order_id) ? "requested by the strategy" : "nothing open to cancel"));
+                    collect();
+                } else {
+                    const auto& place = std::get<strategy::Place>(action);
+                    const bool resting = place.order.type == OrderType::limit;
+                    write_console(std::format("Signal    | event #{} | {}\n", event.time.ordinal,
+                        place.signal == strategy::Signal::stop_loss ? "STOP-LOSS position value fell below the limit"
+                        : place.signal == strategy::Signal::buy ? (resting ? "BUY limit bid placed" : "BUY ask threshold reached")
+                        : (resting ? "SELL limit ask placed" : "SELL bid threshold reached")));
+                    submit(event, place.order, signal_name(place.signal));
+                }
             }
             return;
         }

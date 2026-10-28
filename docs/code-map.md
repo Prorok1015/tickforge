@@ -28,8 +28,8 @@ tickforge/
       src/
     strategy/                      library: tickforge_strategy (decision policies)
       CMakeLists.txt
-      include/tickforge/strategy/   Strategy interface, View, ThresholdConfig
-      src/                         threshold policy
+      include/tickforge/strategy/   Strategy interface and actions, View, shared rules, ThresholdConfig
+      src/                         rules, threshold and threshold_maker policies
     console/                       library: tickforge_console
       CMakeLists.txt
       include/tickforge/console/    public presentation headers
@@ -230,11 +230,12 @@ network or console dependency is introduced into the ledger/execution libraries.
 See [paper trading](paper-trading.md) for units, config syntax, assumptions,
 example balances, PnL rules, and failure behavior.
 
-`strategy/strategy.hpp` defines a decision interface returning an optional market
-request from a value snapshot of quotes, event time, availability, balances, and
-position. The app fills the quotes from `Simulator::executable_level`, which nets out
-virtual consumption. `threshold.hpp/.cpp` implements an inventory-aware buy/sell
-threshold policy that never sells below its fee-adjusted cost basis. The
+`strategy/strategy.hpp` defines a decision interface returning actions (place,
+cancel, notice) from a value snapshot of quotes, event time, availability, balances,
+position, risk state, and open orders. The app fills the quotes from
+`Simulator::executable_level`, which nets out virtual consumption. `rules.hpp/.cpp`
+holds shared decision rules; `threshold.hpp/.cpp` (market orders) and
+`threshold_maker.hpp/.cpp` (resting limit orders) implement the two policies. The
 app's existing `paper_command.cpp` also assembles the `strategy` command, invoking
 the policy after each simulator update and before submitting through OrderManager.
 `paper_scenario.*` validates either scripted `[[orders]]` or a `[strategy]` table.

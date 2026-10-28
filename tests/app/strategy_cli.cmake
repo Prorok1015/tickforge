@@ -55,7 +55,7 @@ endforeach()
 execute_process(COMMAND "${PROGRAM}" strategy "${falling}" --config "${SCENARIO}"
     --set strategy.stop_loss=1% --set strategy.cooldown=1000ns
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
-string(FIND "${output}" "Cooldown  | event #3 | stop-loss closed the position; no buys until elapsed=1200 ns" cooldown)
+string(FIND "${output}" "Notice    | event #3 | stop-loss closed the position; no buys until elapsed=1200 ns" cooldown)
 if(NOT "${result}" STREQUAL "0" OR cooldown EQUAL -1 OR output MATCHES "event #3 \\| BUY"
         OR NOT output MATCHES "Paper complete \\| 2 requests")
     message(FATAL_ERROR "Cooldown must block the rebuy after a stop-loss: ${output} ${error}")
@@ -82,7 +82,7 @@ foreach(case IN ITEMS "strategy: invalid threshold|strategy.sell_above=99"
         "strategy: invalid threshold|strategy.buy_budget=0"
         "strategy: invalid threshold|strategy.stop_loss=100%"
         "strategy: invalid threshold|strategy.cooldown=5ns"
-        "strategy.type: only|strategy.type=grid"
+        "strategy.type: must be|strategy.type=grid"
         "strategy.buy_below: '100.001' has more than 2|strategy.buy_below=100.001")
     string(FIND "${case}" "|" bar)
     string(SUBSTRING "${case}" 0 ${bar} expected)
@@ -163,5 +163,28 @@ execute_process(COMMAND "${PROGRAM}" strategy "${no_quotes}" --config "${SCENARI
 file(READ "${reports}/held-summary.csv" summary)
 if(NOT "${result}" STREQUAL "0" OR NOT summary MATCHES "mark_price_atoms,\nmark_event_ordinal,\nmarket_value_quote_atoms,\nunrealized_pnl_quote_atoms,\ntotal_pnl_quote_atoms,\nequity_quote_atoms,\n")
     message(FATAL_ERROR "Unavailable valuation must be empty fields: ${summary} ${error}")
+endif()
+
+# threshold_maker on a v4 session: the bid joins 99.00 behind 0.01 BTC, a 0.012 BTC sale
+# fills it as maker; the ask then rests at 102.00 and a buyer lifts it.
+set(maker_market "${reports}/maker-market.csv")
+file(WRITE "${maker_market}" "tickforge,4,BINANCE_SPOT,BTCUSDT,price_scale=100,quantity_scale=100000000\nsnapshot,1,0,0,0,1,1,1,9900,1000000,10000,100000\ntrade,2,0,0,1,9900,1200000,11,sell\nsnapshot,3,0,0,2,2,1,1,10100,1000000,10250,1000000\ntrade,4,0,0,3,10200,200000,12,buy\nend,4\n")
+execute_process(COMMAND "${PROGRAM}" strategy "${maker_market}" --config "${SCENARIO}" --report "${reports}/maker"
+    --set strategy.type=threshold_maker --set execution.maker_fee=0.02%
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+file(READ "${reports}/maker-summary.csv" summary)
+foreach(expected IN ITEMS "Strategy  | threshold_maker | post-only bid at <= 100.00 USDT"
+        "Signal    | event #1 | BUY limit bid placed" "LIMIT 99.00 USDT post-only"
+        "price=99.00 USDT | quantity=0.00200000 BTC | notional=0.19800000 USDT | fee=0.00003960 USDT | maker"
+        "Signal    | event #2 | SELL limit ask placed" "LIMIT 102.00 USDT post-only"
+        "price=102.00 USDT | quantity=0.00200000 BTC | notional=0.20400000 USDT | fee=0.00004080 USDT | maker"
+        "realized=+0.00591960 USDT")
+    string(FIND "${output}" "${expected}" position)
+    if(NOT "${result}" STREQUAL "0" OR position EQUAL -1)
+        message(FATAL_ERROR "Maker strategy missing: ${expected}\n${output}\n${error}")
+    endif()
+endforeach()
+if(NOT summary MATCHES "strategy,threshold_maker\n" OR NOT summary MATCHES "maker_fills,2\n")
+    message(FATAL_ERROR "Maker summary mismatch: ${summary}")
 endif()
 file(REMOVE_RECURSE "${reports}")

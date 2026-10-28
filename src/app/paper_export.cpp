@@ -140,7 +140,7 @@ void PaperExport::complete(std::string_view command, std::string_view session, s
     add("max_drawdown_quote_atoms", scenario.risk.max_drawdown_quote);
     add("max_orders_per_minute", scenario.risk.max_orders_per_minute);
     if (const auto& s = scenario.strategy) {
-        add("strategy", "threshold");
+        add("strategy", scenario.strategy_type);
         add("buy_price_atoms", s->buy_price_atoms);
         add("sell_price_atoms", s->sell_price_atoms);
         add("strategy_quantity_atoms", s->quantity_atoms);
