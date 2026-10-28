@@ -9,6 +9,44 @@ uses the namespace `tickforge::adapters::binance`. `TICKFORGE_ENABLE_LIVE` is ke
 as the existing opt-in switch; capture/replay commands are unchanged. This is a
 market-data adapter only, not an order-execution API.
 
+## Forward paper trading
+
+`live` runs a strategy on the same public stream, with simulated execution and
+virtual funds. No order leaves the machine; there are still no keys.
+
+```sh
+./build-live/tickforge live --config FILE.toml [--set KEY=VALUE]... [--duration SECONDS] \
+    [--record NEW_SESSION] [--report PREFIX] [--plain]
+```
+
+- The config must have a `[strategy]` section; scripted `[[orders]]` need a recording.
+- `--duration` is 1..86400 seconds of wall-clock time (default 600), including
+  connection. Ctrl+C or SIGTERM stops earlier, the same way: the feed ends with a
+  `shutdown` reset, resting and in-flight orders end as `session_ended`, fills that
+  already executed are still reported, an open position is valued at the last trusted
+  bid (not sold), the recording gets its footer, and the reports are completed.
+- `--record` writes the session exactly as `capture` does. Every event is recorded
+  before the engine sees it, so the recording holds precisely what the strategy saw.
+- `--report` writes the same CSV reports as offline runs, with `command,live`.
+- In a terminal the run is a full-screen view redrawn in place, about five times per
+  second of session time: the top ten levels of each side with our resting orders
+  marked, balances (total, reserved, available), cost, realized and unrealized PnL,
+  equity, risk state, open orders, fill evidence, and recent signals, fills, and feed
+  notes. The final summary is printed after the view closes. `--plain`, or output
+  that is not a terminal, prints the journal lines instead, without a line per event.
+
+**Replay equals live.** The engine reads no clock: decisions, latency, and risk use
+only the receive offsets stored in the events. Replaying the recording with the same
+config and overrides (the command is printed at the end) must reproduce the orders,
+fills, markouts, and PnL of the live run byte for byte; only the command and file
+names in the summary differ. A difference would mean that something outside the
+events influenced a decision. The same recording can then be replayed with other
+strategies to compare them on exactly the same market.
+
+During a feed outage, resting orders stay, as they would at a venue. New orders are
+cancelled without a trusted book, and after resynchronization resting orders move to
+the back of the visible queue; see the paper trading model for details.
+
 ## Linux / WSL build
 
 Keep the default dependency-free build for replay, or enable the network component:

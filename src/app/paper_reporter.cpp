@@ -44,6 +44,7 @@ void balances(const accounting::Balances& balance)
 }
 
 std::string money_text(std::int64_t atoms) { return money(atoms); }
+std::string signed_money_text(std::int64_t atoms) { return signed_money(atoms); }
 
 namespace {
 std::string risk_text(const execution::RiskLimits& limits)
@@ -69,7 +70,7 @@ std::string overrides_text(const std::vector<std::string>& overrides)
 void paper_header(std::string_view session, std::string_view scenario, const PaperScenario& settings)
 {
     write_console(std::format(
-        "tickforge | Paper trading (offline, virtual funds only)\n"
+        "tickforge | Paper trading (virtual funds only)\n"
         "Market    | {}\nConfig    | {}\nOverrides | {}\n"
         "Execution | market orders, unfilled remainder cancelled\n"
         "Latency   | order={} ns (decision -> execution) | report={} ns (execution -> confirmed result)\n"

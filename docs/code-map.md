@@ -51,7 +51,10 @@ tickforge/
       commands.hpp                 command declarations
       replay_command.cpp           replay command
       capture_command.cpp          capture command / disabled-feature error
-      paper_command.cpp            offline paper trading command: replay -> engine, journal observer
+      paper_command.cpp            offline paper trading command: replay -> engine
+      live_command.cpp             forward paper trading: live feed (+ recording) -> engine
+      live_dashboard.*             full-screen live view; forwards callbacks to the journal
+      paper_journal.*              journal observer: console lines, totals, markouts, reports
       paper_scenario.*             TOML experiment config, overrides, schema checks
       paper_reporter.*             virtual-order/account journal
       paper_export.*               machine-readable order/fill/markout/summary CSV reports
@@ -243,6 +246,13 @@ offsets, so replaying a recorded session with the same config reproduces a run
 exactly. It prints nothing; a `SessionObserver` receives market, report, request,
 risk, signal, cancel, and notice callbacks, and the app's observers turn them into
 the console journal, totals, markouts, and CSV reports.
+
+Both market sources push events to a handler: `core::replay` from a file and
+`adapters::binance::run_feed` from the live stream (recording each event first when
+asked). `paper_command.cpp` feeds a recording to the engine; `live_command.cpp` feeds
+the live stream to the same engine, with `live_dashboard.*` as the observer in a
+terminal. `paper_journal.*` is the shared observer that prints the journal, counts
+totals, measures markouts, and writes the reports for both.
 
 The app's `paper_command.cpp` connects these pieces; `paper_scenario.*` reads the
 TOML config (with `--set` overrides) into atoms using `core/units`,

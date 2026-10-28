@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 namespace tickforge::engine {
 
@@ -66,6 +67,9 @@ public:
     const execution::RiskGuard& risk() const { return risk_; }
     std::optional<Mark> mark() const { return mark_; }
     std::int64_t initial_equity() const { return initial_equity_; }
+    // The recorded book as the simulator knows it, and this account's unfinished orders.
+    const OrderBook& book() const { return simulator_.book(); }
+    std::vector<execution::OpenOrder> open_orders() const { return manager_.open_orders(); }
 private:
     void submit_at(const EventTime& time, const Order& order, std::string_view signal);
     void collect();

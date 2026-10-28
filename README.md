@@ -155,12 +155,14 @@ the simulator should exercise them first.
 
 ### 5. Forward paper trading and a shared session engine
 
-- [ ] Define a market source interface implemented by file replay and the live feed.
+- [x] Define a market source interface implemented by file replay and the live feed:
+  both push events to one handler, which feeds the engine.
 - [x] Extract the per-event loop (source -> risk -> strategy -> order manager ->
   reports) from the app into a reusable `tickforge_engine` target.
-- [ ] Add a forward paper mode: the live public feed with simulated execution and
-  virtual funds, no keys.
-- [ ] Record the live session alongside forward trading so the run can be replayed.
+- [x] Add a forward paper mode: the live public feed with simulated execution and
+  virtual funds, no keys (`live`, with a full-screen terminal view).
+- [x] Record the live session alongside forward trading so the run can be replayed;
+  replaying the recording with the same config reproduces the run exactly.
 - [ ] Run several strategies on one account: per-strategy sub-ledgers (position, cost,
   PnL) with fills tagged by strategy, per-strategy and account risk limits, capital
   allocation, and self-trade prevention. Until then a run has exactly one strategy.
@@ -301,6 +303,15 @@ the optional dependencies. Example after that build:
 mkdir -p recordings
 ./build-live/tickforge capture recordings/btcusdt-session.csv 30
 ./build-live/tickforge replay recordings/btcusdt-session.csv
+```
+
+**Forward paper trading** runs a strategy on the live feed with simulated execution
+and virtual funds, shows the book and account in place, and records the session so
+the run can be replayed exactly (see [live capture](docs/live-capture.md#forward-paper-trading)):
+
+```sh
+./build-live/tickforge live --config examples/threshold.toml --duration 600 \
+    --record recordings/forward.csv --report reports/forward
 ```
 
 The file must be new. Capture uses no keys and cannot place orders. Successful

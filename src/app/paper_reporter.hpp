@@ -12,6 +12,8 @@ using Mark = engine::Mark;
 
 // 1e-8 USDT atoms as a fixed eight-decimal amount.
 std::string money_text(std::int64_t atoms);
+// Signed 1e-8 USDT atoms with an explicit sign.
+std::string signed_money_text(std::int64_t atoms);
 // "k=v; k=v" in command-line order, or "none".
 std::string overrides_text(const std::vector<std::string>& overrides);
 void paper_header(std::string_view session, std::string_view scenario, const PaperScenario& config);

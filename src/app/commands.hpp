@@ -15,4 +15,15 @@ struct PaperOptions {
     std::string report_prefix;       // empty: no machine-readable report files
 };
 void paper_session(const PaperOptions& options);
+
+struct LiveOptions {
+    std::string config;
+    std::vector<std::string> overrides;
+    std::string report_prefix;
+    std::string record_path;  // empty: the live session is not recorded
+    unsigned seconds = 600;
+    bool plain = false;       // journal lines instead of the full-screen view
+};
+// Forward paper trading on the live public feed (requires a live-enabled build).
+void live_session(const LiveOptions& options);
 }
