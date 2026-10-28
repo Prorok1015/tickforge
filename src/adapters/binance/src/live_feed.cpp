@@ -1,4 +1,5 @@
 #include <tickforge/adapters/binance/capture.hpp>
+#include <tickforge/adapters/binance/live_feed.hpp>
 #include <tickforge/adapters/binance/binance_protocol.hpp>
 #include <tickforge/core/book_tracker.hpp>
 #include <tickforge/console/console.hpp>
@@ -160,12 +161,16 @@ private:
     std::function<void(Error)> done_;
 };
 
-class Capture : public std::enable_shared_from_this<Capture> {
+class Feed : public std::enable_shared_from_this<Feed> {
 public:
-    Capture(net::io_context& io, const std::string& path, unsigned seconds)
-        : io_(io), tls_(ssl::context::tls_client), recorder_(path), deadline_(io), watchdog_(io), retry_(io),
-          signals_(io, SIGINT, SIGTERM), seconds_(seconds)
+    using Handler = std::function<void(const MarketEvent&)>;
+    using Note = std::function<void(std::string_view)>;
+    Feed(net::io_context& io, const FeedOptions& options, Handler handler, Note note)
+        : io_(io), tls_(ssl::context::tls_client), deadline_(io), watchdog_(io), retry_(io),
+          signals_(io, SIGINT, SIGTERM), seconds_(options.seconds), show_book_(options.show_book),
+          handler_(std::move(handler)), note_(std::move(note))
     {
+        if (options.record_path) recorder_.emplace(*options.record_path);
         tls_.set_default_verify_paths();
         tls_.set_options(ssl::context::no_sslv2 | ssl::context::no_sslv3 | ssl::context::no_tlsv1 | ssl::context::no_tlsv1_1);
     }
@@ -178,19 +183,20 @@ public:
         deadline_.async_wait([self = shared_from_this()](Error ec) {
             if (!ec) self->guard([&] { self->complete(); });
         });
-        write_console(std::format(
-            "tickforge | Public Binance depth and trade capture\n"
+        note_(std::format(
+            "tickforge | Public Binance depth and trade stream\n"
             "REST      | https://{}\nWebSocket | wss://{}{}\n"
             "Mode      | SIMULATION ONLY | BTCUSDT | no keys or orders\n"
             "Duration  | {} seconds including connection/synchronization\n", rest_host, stream_host, stream_target, seconds_));
         request("/api/v3/exchangeInfo?symbol=BTCUSDT", [self = shared_from_this()](std::string body, EventTime) {
             self->rules_ = parse_instrument(body);
-            write_console(std::format("Metadata  | tick={} USDT | step={} BTC\n",
+            self->note_(std::format("Metadata  | tick={} USDT | step={} BTC\n",
                 price_text(self->rules_.price_tick_atoms), quantity_text(self->rules_.quantity_step_atoms)));
             self->connect();
         });
     }
     const std::string& failure() const { return failure_; }
+    FeedSummary summary() const { return {ordinal_, trades_, reconnects_}; }
 private:
     template<class Function> void guard(Function function)
     {
@@ -211,7 +217,8 @@ private:
         time.ordinal = ++ordinal_;
         time.exchange_ns = exchange;
         MarketEvent event{time, std::move(data)};
-        recorder_.append(event); // Record first, so a storage failure stops processing.
+        if (recorder_) recorder_->append(event); // Record first, so a storage failure stops processing.
+        handler_(event);
         const auto result = std::visit([&](const auto& value) -> BookResult {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, Trade>) return BookResult::stale;
@@ -219,8 +226,8 @@ private:
         }, event.data);
         if (tracker_.view().synchronized()) ever_ready_ = true;
         const auto now = Clock::now();
-        if ((result != BookResult::applied && result != BookResult::stale &&
-            result != BookResult::awaiting_snapshot && result != BookResult::buffering) || now - last_display_ >= std::chrono::seconds(1)) {
+        if (show_book_ && ((result != BookResult::applied && result != BookResult::stale &&
+            result != BookResult::awaiting_snapshot && result != BookResult::buffering) || now - last_display_ >= std::chrono::seconds(1))) {
             write_console(std::format("\nEvent #{} | elapsed={} ns | {}\n{}",
                 ordinal_, event.time.receive_elapsed_ns, result_text(result), book_text(tracker_.view())));
             if (std::fflush(stdout) != 0) throw std::runtime_error("console flush failed");
@@ -281,7 +288,7 @@ private:
     void snapshot()
     {
         if (++snapshot_requests_ > 12) throw std::runtime_error("snapshot retry budget exhausted");
-        write_console("Snapshot  | requesting up to 5000 levels per side; stream continues buffering\n");
+        note_("Snapshot  | requesting up to 5000 levels per side; stream continues buffering\n");
         request("/api/v3/depth?symbol=BTCUSDT&limit=5000", [self = shared_from_this()](std::string body, EventTime received) {
             const auto result = self->emit(parse_snapshot(body, self->rules_), 0, received);
             if (result == BookResult::invalid) throw std::runtime_error("invalid REST snapshot/book");
@@ -313,7 +320,7 @@ private:
         emit(BookReset{reason == "stale_depth" ? "stale_depth" : "disconnect"});
         if (++reconnects_ > 5) throw std::runtime_error("reconnect retry budget exhausted");
         const auto delay = std::min(1U << (reconnects_ - 1), 8U);
-        write_console(std::format("Reconnect | {} | retry {}/5 in {} seconds\n", reason, reconnects_, delay));
+        note_(std::format("Reconnect | {} | retry {}/5 in {} seconds\n", reason, reconnects_, delay));
         retry_.expires_after(std::chrono::seconds(delay));
         retry_.async_wait([self = shared_from_this()](Error ec) {
             if (!ec) self->guard([&] {
@@ -331,16 +338,16 @@ private:
     }
     void complete()
     {
-        if (!ever_ready_) throw std::runtime_error("capture ended before any synchronized book was established");
+        if (!ever_ready_) throw std::runtime_error("stream ended before any synchronized book was established");
         cancel_network();
         deadline_.cancel();
         retry_.cancel();
         signals_.cancel();
         emit(BookReset{"shutdown"});
-        recorder_.finish();
+        if (recorder_) recorder_->finish();
         stopping_ = true;
-        write_console(std::format("\nCapture complete | {} events ({} trades) | {} reconnects | recording footer saved\n",
-            ordinal_, trades_, reconnects_));
+        note_(std::format("\nStream complete | {} events ({} trades) | {} reconnects | {}\n",
+            ordinal_, trades_, reconnects_, recorder_ ? "recording footer saved" : "not recorded"));
     }
     void fail(std::string message)
     {
@@ -354,10 +361,13 @@ private:
     }
     net::io_context& io_;
     ssl::context tls_;
-    SessionRecorder recorder_;
+    std::optional<SessionRecorder> recorder_;
     net::steady_timer deadline_, watchdog_, retry_;
     net::signal_set signals_;
     unsigned seconds_;
+    bool show_book_;
+    Handler handler_;
+    Note note_;
     InstrumentRules rules_{};
     BookTracker tracker_;
     std::shared_ptr<HttpsGet> request_;
@@ -370,14 +380,22 @@ private:
 };
 } // namespace
 
+FeedSummary run_feed(const FeedOptions& options, const std::function<void(const MarketEvent&)>& on_event,
+                     const std::function<void(std::string_view)>& on_note)
+{
+    if (options.seconds == 0) throw std::runtime_error("stream duration must be positive");
+    net::io_context io;
+    auto feed = std::make_shared<Feed>(io, options, on_event, on_note);
+    feed->start();
+    io.run();
+    if (!feed->failure().empty()) throw std::runtime_error(feed->failure());
+    return feed->summary();
+}
+
 void capture(const std::string& path, unsigned seconds)
 {
     if (seconds == 0 || seconds > 3600) throw std::runtime_error("capture duration must be 1..3600 seconds");
-    net::io_context io;
-    auto capture = std::make_shared<Capture>(io, path, seconds);
-    capture->start();
-    io.run();
-    if (!capture->failure().empty()) throw std::runtime_error(capture->failure());
+    run_feed({seconds, path, true}, [](const MarketEvent&) {}, [](std::string_view text) { write_console(text); });
     if (std::fflush(stdout) != 0) throw std::runtime_error("console flush failed");
 }
 } // namespace tickforge::adapters::binance

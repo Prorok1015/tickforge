@@ -149,11 +149,13 @@ the same `MarketEvent` types; a common virtual source interface is not implement
 decimal precision, tick/quantity steps, symbols, IDs, and timestamps. It contains
 no sockets, making its inputs easy to test with synthetic JSON.
 
-`capture.hpp/.cpp` provides the `adapters::binance::capture` entry point. Its private
+`live_feed.hpp` declares `run_feed`: the public stream as pushed market events, each
+recorded first (optionally) and then handed to a caller's handler, plus status notes.
+`capture.hpp` declares `capture`, which is `run_feed` with recording, a once-per-second
+book view, and a no-op handler. Both are implemented in `live_feed.cpp`: its private
 `HttpsGet` handles REST transport, `StreamSocket` handles the combined depth/trade
-WebSocket, and
-`Capture` coordinates metadata, recording, book tracking, timers, and recovery.
-There is one application event loop.
+WebSocket, and `Feed` coordinates metadata, recording, book tracking, timers, signals,
+and recovery. There is one application event loop.
 
 ## Console and application files
 

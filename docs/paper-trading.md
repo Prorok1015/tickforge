@@ -361,7 +361,12 @@ What this model cannot know, and what to keep in mind when reading results:
   fills cluster just before moves against the position. Saving the spread and the
   taker fee does not by itself make a profit.
 - **Trade gaps.** Trades missed by the feed (see the replay `Trade feed` summary) may
-  hide fills. Queue estimates after a reconnect rely on the new snapshot only.
+  hide fills.
+- **Feed outages.** A resting order survives a reset and reconnect, as a real order
+  stays at the venue while our market data is gone. What traded during the outage is
+  unknown, so when the book synchronizes again each resting order moves to the back
+  of the visible queue at its price, and a new book that has crossed its price fills
+  it (`book_cross`). Fills after an outage are counted as near a data gap.
 
 ## Fill diagnostics and markouts
 

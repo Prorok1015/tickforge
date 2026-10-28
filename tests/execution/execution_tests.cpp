@@ -398,6 +398,35 @@ void limit_cancel_race_and_session_end()
           "resting orders end with the session");
 }
 
+void limit_survives_feed_outage()
+{
+    auto settings = config();
+    settings.stale_after_ns = 1000000;
+    Simulator simulator(settings);
+    accounting::Account account(1000000, 0, 0);
+    OrderManager manager(account, simulator, settings);
+    simulator.on_market_event(event(1, BookSnapshot{1, {{9900, 400}}, {{10100, 500}}}, 0));
+    check(!manager.submit(limit(1, Side::buy, 100, 9900)), "a limit buy rests");
+    simulator.on_market_event(event(2, Trade{9900, 350, 11, Aggressor::sell}, 10));
+    check(simulator.queue_ahead(1) == 50, "trades move us up the queue");
+    // The feed drops: like a venue order, ours stays; only our knowledge is lost.
+    simulator.on_market_event(event(3, BookReset{"disconnect"}, 20));
+    check(simulator.queue_ahead(1) == 50 && manager.open_orders().size() == 1, "a feed outage does not cancel the order");
+    simulator.on_market_event(event(4, BookSnapshot{2, {{9900, 900}}, {{10100, 500}}}, 30));
+    check(simulator.queue_ahead(1) == 900, "after resynchronization we assume the back of the visible queue");
+    simulator.on_market_event(event(5, Trade{9900, 950, 12, Aggressor::sell}, 40));
+    auto reports = manager.collect();
+    check(reports.size() == 2 && reports[1].result.fills.size() == 1 && reports[1].result.fills[0].quantity_atoms == 50 &&
+          reports[1].diagnostics[0].since_gap_ns == 20, "only what passes the whole visible queue reaches us, flagged after a gap");
+    // Blind again, and the market falls through our bid meanwhile: we were hit while away.
+    simulator.on_market_event(event(6, BookReset{"disconnect"}, 50));
+    simulator.on_market_event(event(7, BookSnapshot{3, {{9700, 900}}, {{9800, 500}}}, 60));
+    reports = manager.collect();
+    check(reports.size() == 1 && reports[0].final && reports[0].result.status == OrderStatus::filled &&
+          reports[0].diagnostics[0].source == FillSource::book_cross && account.balances().base_total == 100,
+          "a book that resynchronizes through our price fills the order");
+}
+
 // Test executions answer each submitted order with a scripted result.
 class ScriptedExecution : public Execution {
 public:
@@ -470,7 +499,7 @@ int main()
     try {
         routing_and_liquidity(); budget_and_rounding(); risk_and_freshness(); partial_sell(); uncertain_results();
         latency(); risk_limits();
-        limit_queue_and_fills(); limit_crossing_post_only_and_cancel(); limit_cancel_race_and_session_end();
+        limit_queue_and_fills(); limit_crossing_post_only_and_cancel(); limit_cancel_race_and_session_end(); limit_survives_feed_outage();
         std::fputs("Execution, risk, and liquidity checks passed\n", stdout);
         return 0;
     } catch (const std::exception& error) {

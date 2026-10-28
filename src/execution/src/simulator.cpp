@@ -62,7 +62,15 @@ void Simulator::on_market_event(const MarketEvent& event)
                 consumed_bids_.clear(); consumed_asks_.clear();
             }
             if (synchronized_ && !tracker_.view().synchronized()) last_gap_ns_ = now_ns_;
+            const bool resynchronized = !synchronized_ && tracker_.view().synchronized();
             synchronized_ = tracker_.view().synchronized();
+            // Resting orders live on through a feed outage, as they would at the venue, but
+            // our queue estimate did not: trades during the gap are unknown. Assume the
+            // worst place, behind everything now visible; match_book below still fills
+            // orders the new book has crossed.
+            if (resynchronized)
+                for (auto& resting : resting_)
+                    resting.queue_ahead = level_size(resting.order.side, resting.order.limit_price_atoms);
             if (!synchronized_) {
                 consumed_bids_.clear(); consumed_asks_.clear();
                 last_fresh_ns_.reset();
