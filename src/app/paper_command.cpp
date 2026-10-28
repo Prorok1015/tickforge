@@ -30,10 +30,13 @@ void paper_session(std::string_view session_path, std::string_view scenario_path
     if (algorithm) write_console(std::format(
         "Strategy  | threshold | buy ask <= {} USDT | sell bid >= {} USDT, never below fee-adjusted cost\n"
         "Stop-loss | {}\n"
+        "Cooldown  | {}\n"
         "Decision  | once per event, confirmed inventory, at most one market request\n\n",
         price_text(scenario.strategy->buy_price_atoms), price_text(scenario.strategy->sell_price_atoms),
         scenario.strategy->stop_loss_ppm == 0 ? std::string("off")
-            : std::format("sell at market when position value is {} ppm below cost", scenario.strategy->stop_loss_ppm)));
+            : std::format("sell at market when position value is {} ppm below cost", scenario.strategy->stop_loss_ppm),
+        scenario.strategy->cooldown_ns == 0 ? std::string("off")
+            : std::format("no buys for {} ns after a stop-loss closes the position", scenario.strategy->cooldown_ns)));
     const auto submit = [&](const MarketOrder& order) {
         const auto report = manager.submit(order);
         paper_order(report);
@@ -52,6 +55,9 @@ void paper_session(std::string_view session_path, std::string_view scenario_path
             const auto order = algorithm->on_market({event.time, simulator.available(),
                 simulator.executable_level(Side::sell), simulator.executable_level(Side::buy),
                 account.balances(), account.position()});
+            if (const auto until = algorithm->started_cooldown_until())
+                write_console(std::format("Cooldown  | event #{} | stop-loss closed the position; no buys until elapsed={} ns\n",
+                    event.time.ordinal, *until));
             if (order) {
                 const auto signal = algorithm->last_signal();
                 write_console(std::format("Signal    | event #{} | {}\n", event.time.ordinal,

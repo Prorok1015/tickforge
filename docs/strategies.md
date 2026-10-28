@@ -63,7 +63,7 @@ config,1000,1000,1000000,1000000,5000000000
 threshold,10000,10200,200000,1000000000
 ```
 
-The threshold fields are `buy_price_atoms,sell_price_atoms,quantity_atoms,buy_budget_quote_atoms[,stop_loss_ppm]`.
+The threshold fields are `buy_price_atoms,sell_price_atoms,quantity_atoms,buy_budget_quote_atoms[,stop_loss_ppm[,cooldown_ns]]`.
 Prices are integer hundredths of USDT; BTC quantities and USDT budgets use 1e-8
 units. The example means buy when ask <= 100.00 USDT, sell when bid >= 102.00 USDT,
 request 0.002 BTC, and spend at most 10 USDT per buy including fees. Buy price must
@@ -108,14 +108,42 @@ Two consequences matter when choosing the value:
   bid, below the ask it was bought at. Right after a buy the position is therefore
   "down" by roughly the buy fee plus the spread. A stop narrower than that fires
   immediately after every purchase.
-- There is no cooldown. After a stop the policy is flat, so it buys again on the
-  next event while ask <= the buy threshold. A stop close to the entry price turns
-  a sideways market into repeated buy/stop round trips, each paying two fees.
+- Without a cooldown, the policy is flat after a stop and buys again on the next
+  event while ask <= the buy threshold. A stop close to the entry price turns a
+  sideways market into repeated buy/stop round trips, each paying two fees.
 
-On a private 15-minute BTCUSDT recording with 0.1% fees, a 1000 ppm stop produced
-dozens of such round trips and lost tens of USDT on a 0.01 BTC lot, while a 2000 ppm
-stop triggered rarely. Recordings are not in Git; the effect is reproduced by the
-synthetic CLI test, where the policy stops out and immediately rebuys. It does not top up
+On a private 15-minute BTCUSDT recording with 0.1% fees, a 1000 ppm stop without a
+cooldown produced dozens of such round trips and lost tens of USDT on a 0.01 BTC lot,
+while a 2000 ppm stop triggered rarely. Recordings are not in Git; the effect is
+reproduced by the synthetic CLI test, where the policy stops out and immediately rebuys.
+
+## Cooldown after a stop-loss
+
+The optional sixth threshold field `cooldown_ns` pauses new **buys** after a stop-loss
+exit. It requires a stop-loss; a cooldown without one is rejected because it would
+silently do nothing. Design choices:
+
+- **Recorded time, not event count.** Event rates follow market activity: a fast
+  market would make an event-count pause shortest exactly when it matters most. The
+  pause uses `receive_elapsed_ns`, the recorded monotonic offset, so replay remains
+  deterministic. Exchange timestamps are missing for snapshots and need not increase;
+  the computer's current clock has no relation to a replayed session.
+- **Only after a stop-loss.** After a take-profit sale `ask > bid >= sell threshold >
+  buy threshold`, so an immediate rebuy is impossible anyway.
+- **Only buys wait.** Stops and take-profit sales are never delayed: blocking a stop
+  would defeat its purpose.
+- **Started by confirmed balances.** Proposing a stop starts nothing: the order may be
+  rejected or fill partially, and the stop then retries. The pause starts at the
+  first event whose view shows no BTC after a stop proposal, even if quotes are
+  unavailable at that moment. Otherwise a long series of rejected stops could use up
+  the pause before the exit actually happened. Because the view follows the event
+  that executed the stop, the pause starts one event after the fill.
+
+The journal prints `Cooldown | event #N | ... no buys until elapsed=T ns`. On the same
+private recordings, a 30 or 120 second cooldown cut the 1000 ppm stop's round trips
+several times and reduced its loss accordingly. The results remained negative: the
+cooldown limits repeated entries but cannot make a stop narrower than fee plus spread
+useful. It does not top up
 a partial buy. Inventory below one step remains as dust. Open reservations block
 decisions. Missing, stale, invalid, or crossed quotes produce no order.
 

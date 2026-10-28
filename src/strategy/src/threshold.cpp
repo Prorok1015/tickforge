@@ -33,8 +33,9 @@ void validate_config(const ThresholdConfig& c)
     if (c.buy_price_atoms <= 0 || c.sell_price_atoms <= c.buy_price_atoms ||
         c.quantity_atoms <= 0 || c.buy_budget_quote_atoms <= 0 || c.quantity_step_atoms <= 0 ||
         c.quantity_atoms % c.quantity_step_atoms != 0 || c.fee_ppm < 0 || c.fee_ppm > 1000000 ||
-        c.stop_loss_ppm < 0 || c.stop_loss_ppm >= 1000000)
-        throw std::runtime_error("invalid threshold strategy prices, quantity, budget, step, fee, or stop-loss");
+        c.stop_loss_ppm < 0 || c.stop_loss_ppm >= 1000000 || c.cooldown_ns < 0 ||
+        (c.cooldown_ns > 0 && c.stop_loss_ppm == 0))
+        throw std::runtime_error("invalid threshold strategy prices, quantity, budget, step, fee, stop-loss, or cooldown");
 }
 Threshold::Threshold(ThresholdConfig config) : config_(config) { validate_config(config); }
 
@@ -43,13 +44,23 @@ std::optional<MarketOrder> Threshold::on_market(const View& view)
     if (view.time.ordinal <= last_ordinal_) throw std::runtime_error("strategy requires increasing event ordinals");
     last_ordinal_ = view.time.ordinal;
     last_signal_ = Signal::none;
+    started_cooldown_.reset();
+    // Balances are confirmed even while quotes are unavailable, so check them first.
+    if (stop_pending_ && view.balances.base_total == 0 && view.balances.base_reserved == 0) {
+        stop_pending_ = false;
+        if (config_.cooldown_ns > 0) {
+            cooldown_until_ = amount_add(view.time.receive_elapsed_ns, config_.cooldown_ns);
+            started_cooldown_ = cooldown_until_;
+        }
+    }
     if (!view.available || !view.bid || !view.ask || view.bid->price_atoms <= 0 ||
         view.ask->price_atoms <= 0 || view.bid->price_atoms >= view.ask->price_atoms ||
         view.bid->quantity_atoms <= 0 || view.ask->quantity_atoms <= 0 ||
         view.balances.base_reserved != 0 || view.balances.quote_reserved != 0) return std::nullopt;
     std::optional<MarketOrder> order;
     auto signal = Signal::none;
-    if (view.balances.base_total == 0 && view.ask->price_atoms <= config_.buy_price_atoms) {
+    const bool cooling = cooldown_until_ && view.time.receive_elapsed_ns < *cooldown_until_;
+    if (view.balances.base_total == 0 && !cooling && view.ask->price_atoms <= config_.buy_price_atoms) {
         const auto budget = std::min(config_.buy_budget_quote_atoms, view.balances.available_quote());
         if (budget > 0) order = MarketOrder{next_id_, Side::buy, config_.quantity_atoms, budget};
         signal = Signal::buy;
@@ -71,6 +82,7 @@ std::optional<MarketOrder> Threshold::on_market(const View& view)
     if (order) {
         next_id_ = amount_add(next_id_, 1);
         last_signal_ = signal;
+        stop_pending_ = signal == Signal::stop_loss;
     }
     return order;
 }

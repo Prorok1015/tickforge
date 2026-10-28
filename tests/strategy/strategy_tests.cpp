@@ -83,6 +83,37 @@ int main()
         stop_config.stop_loss_ppm = 1000000;
         try { strategy::Threshold bad(stop_config); } catch (const std::runtime_error&) { threw = true; }
         check(threw);
+
+        // Cooldown: 1 s of recorded time, started only once the view confirms the exit.
+        strategy::ThresholdConfig cool_config{10000, 10200, 200000, 1000000000, 1000, 1000, 10000, 1000000000};
+        strategy::Threshold cooling(cool_config);
+        strategy::View view_c{{1, 0, 0, 0}, true, Level{10098, 1000000}, Level{10099, 1000000},
+            {0, 0, 200000, 0}, {20400000, 0}};
+        check(cooling.on_market(view_c) && cooling.last_signal() == strategy::Signal::stop_loss);
+        check(!cooling.started_cooldown_until()); // A proposal alone proves nothing.
+        view_c.time = {2, 0, 0, 100}; // Stop rejected: BTC is still held, so the stop retries.
+        check(cooling.on_market(view_c) && cooling.last_signal() == strategy::Signal::stop_loss &&
+              !cooling.started_cooldown_until());
+        view_c.time = {3, 0, 0, 200}; view_c.balances = {10000000000, 0, 0, 0}; view_c.position = {0, -300000};
+        view_c.available = false; // Confirmed balances start the pause even without quotes.
+        check(!cooling.on_market(view_c) && cooling.started_cooldown_until() == 1000000200);
+        view_c.time = {4, 0, 0, 1000000199}; view_c.available = true; // Buy condition holds below.
+        view_c.ask = Level{9900, 1000000}; view_c.bid = Level{9800, 1000000};
+        check(!cooling.on_market(view_c) && !cooling.started_cooldown_until()); // Still cooling.
+        view_c.time = {5, 0, 0, 1000000200};
+        check(cooling.on_market(view_c) && cooling.last_signal() == strategy::Signal::buy);
+        // A take-profit proposal clears a pending stop, so it never starts a cooldown.
+        strategy::Threshold profit(cool_config);
+        view_c = {{1, 0, 0, 0}, true, Level{10098, 1000000}, Level{10099, 1000000}, {0, 0, 200000, 0}, {20400000, 0}};
+        check(profit.on_market(view_c) && profit.last_signal() == strategy::Signal::stop_loss);
+        view_c.time = {2, 0, 0, 100}; view_c.bid = Level{10300, 1000000}; view_c.ask = Level{10400, 1000000};
+        check(profit.on_market(view_c) && profit.last_signal() == strategy::Signal::take_profit);
+        view_c.time = {3, 0, 0, 200}; view_c.balances = {10000000000, 0, 0, 0}; view_c.position = {0, 100000};
+        view_c.bid = Level{9800, 1000000}; view_c.ask = Level{9900, 1000000};
+        check(profit.on_market(view_c) && !profit.started_cooldown_until() && profit.last_signal() == strategy::Signal::buy);
+        threw = false;
+        try { strategy::Threshold bad({10000, 10200, 1000, 1, 1000, 1000, 0, 1}); } catch (const std::runtime_error&) { threw = true; }
+        check(threw); // A cooldown without a stop-loss would silently do nothing.
         return 0;
     } catch (const std::exception& error) { std::fprintf(stderr, "%s\n", error.what()); return 1; }
 }
