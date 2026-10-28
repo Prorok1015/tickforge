@@ -38,8 +38,27 @@ if(NOT "${result}" STREQUAL "1")
 endif()
 file(READ "${SCENARIO}" config)
 set(scratch "${CMAKE_CURRENT_BINARY_DIR}/strategy-invalid.csv")
+# Stop-loss: buy at 100.00, the bid drops to 98.00, the position is sold at a loss.
+# The policy is flat again, so the next event rebuys while ask <= 100.00 (no cooldown).
+set(falling "${CMAKE_CURRENT_BINARY_DIR}/strategy-falling.csv")
+set(stop_config "${CMAKE_CURRENT_BINARY_DIR}/strategy-stop.csv")
+file(WRITE "${falling}" "tickforge,3,BINANCE_SPOT,BTCUSDT,price_scale=100,quantity_scale=100000000\nsnapshot,1,0,1000000100,0,1,1,1,9900,1000000,10000,100000\nsnapshot,2,0,1000000200,100,2,1,1,9800,1000000,9900,1000000\ntrade,3,1000000350,1000000400,200,9900,1000\nend,3\n")
+file(WRITE "${stop_config}" "tickforge-orders,1,BTCUSDT\naccount,10000000000,0\nconfig,1000,1000,1000000,1000000,5000000000\nthreshold,10000,10200,200000,1000000000,10000\n")
+execute_process(COMMAND "${PROGRAM}" strategy "${falling}" "${stop_config}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+foreach(expected IN ITEMS "Stop-loss | sell at market when position value is 10000 ppm below cost"
+        "Signal    | event #2 | STOP-LOSS" "price=98.00 USDT | quantity=0.00100000 BTC"
+        "realized=-0.00219800 USDT" "Signal    | event #3 | BUY ask")
+    string(FIND "${output}" "${expected}" position)
+    if(NOT "${result}" STREQUAL "0" OR position EQUAL -1)
+        message(FATAL_ERROR "Missing stop-loss result: ${expected}\n${output} ${error}")
+    endif()
+endforeach()
+file(REMOVE "${falling}" "${stop_config}")
+
 foreach(row IN ITEMS "threshold,10200,10000,200000,1000000000" "order,1,1,buy,1000,100000"
-        "threshold,10000,10200,1,1000000000" "threshold,10000,10200,200000,0")
+        "threshold,10000,10200,1,1000000000" "threshold,10000,10200,200000,0"
+        "threshold,10000,10200,200000,1000000000,1000000" "threshold,10000,10200,200000,1000000000,1,2")
     string(REGEX REPLACE "threshold,[^\n]+" "${row}" invalid "${config}")
     file(WRITE "${scratch}" "${invalid}")
     execute_process(COMMAND "${PROGRAM}" strategy "${SESSION}" "${scratch}"

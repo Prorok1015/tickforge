@@ -63,7 +63,7 @@ config,1000,1000,1000000,1000000,5000000000
 threshold,10000,10200,200000,1000000000
 ```
 
-The threshold fields are `buy_price_atoms,sell_price_atoms,quantity_atoms,buy_budget_quote_atoms`.
+The threshold fields are `buy_price_atoms,sell_price_atoms,quantity_atoms,buy_budget_quote_atoms[,stop_loss_ppm]`.
 Prices are integer hundredths of USDT; BTC quantities and USDT budgets use 1e-8
 units. The example means buy when ask <= 100.00 USDT, sell when bid >= 102.00 USDT,
 request 0.002 BTC, and spend at most 10 USDT per buy including fees. Buy price must
@@ -83,8 +83,39 @@ fee must cover the sold share of the cost basis. With average cost `A` and fee r
 `f`, this means roughly `bid * (1 - f) >= A`. The check uses the same integer
 rounding as the simulator and ledger (proceeds down, fee up, sold cost up), so the
 decision and the accounting agree on break-even cases. The fee rate is taken from the
-`config` row. The consequence is deliberate and visible in experiments: after a
-price drop the policy holds BTC indefinitely. There is no stop-loss yet. It does not top up
+`config` row. Without a stop-loss, the consequence is visible in experiments: after a
+price drop the policy holds BTC indefinitely.
+
+## Stop-loss
+
+The optional fifth threshold field `stop_loss_ppm` (0 or absent disables it) exits a
+losing position. When held BTC valued at the best executable bid is at least that
+far below its cost basis, the policy sells the position at market:
+
+```text
+held BTC * bid <= cost basis * (1 - stop_loss_ppm / 1000000)
+```
+
+The limit rounds up, so rounding never delays the stop. The stop takes priority over
+the sell threshold and skips the break-even check and the best-bid size cap: it
+prefers leaving to waiting, accepting slippage. The configured lot still caps the
+request. The journal labels it `STOP-LOSS`. The realized loss is usually larger than
+the stop distance: add the exit fee, slippage, and the gap between events.
+
+Two consequences matter when choosing the value:
+
+- The cost basis already includes the buy fee, and a fresh position is valued at the
+  bid, below the ask it was bought at. Right after a buy the position is therefore
+  "down" by roughly the buy fee plus the spread. A stop narrower than that fires
+  immediately after every purchase.
+- There is no cooldown. After a stop the policy is flat, so it buys again on the
+  next event while ask <= the buy threshold. A stop close to the entry price turns
+  a sideways market into repeated buy/stop round trips, each paying two fees.
+
+On a private 15-minute BTCUSDT recording with 0.1% fees, a 1000 ppm stop produced
+dozens of such round trips and lost tens of USDT on a 0.01 BTC lot, while a 2000 ppm
+stop triggered rarely. Recordings are not in Git; the effect is reproduced by the
+synthetic CLI test, where the policy stops out and immediately rebuys. It does not top up
 a partial buy. Inventory below one step remains as dust. Open reservations block
 decisions. Missing, stale, invalid, or crossed quotes produce no order.
 
@@ -112,7 +143,8 @@ Paper complete | 2 requests | 0 rejected | 2 fills | fees=0.00020200 USDT
   TOTAL   | realized=+0.00179800 USDT | unrealized=+0.00000000 USDT | total=+0.00179800 USDT
 ```
 
-Tests verify decisions after partial/rejected execution, invalid data, reserves,
-quantity steps, unavailable funds, invalid configuration, and exact deterministic
+Tests verify break-even selling, stop-loss triggering and priority, decisions after
+partial/rejected execution, invalid data, reserves, quantity steps, unavailable
+funds, invalid configuration, and exact deterministic
 CLI output on two runs. The strategy receives no future events; the app provides
 one snapshot only after the current event has been applied.

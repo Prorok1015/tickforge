@@ -28,9 +28,12 @@ void paper_session(std::string_view session_path, std::string_view scenario_path
     std::optional<Mark> mark;
     paper_header(session_path, scenario_path, scenario);
     if (algorithm) write_console(std::format(
-        "Strategy  | threshold | buy ask <= {} USDT | sell bid >= {} USDT\n"
+        "Strategy  | threshold | buy ask <= {} USDT | sell bid >= {} USDT, never below fee-adjusted cost\n"
+        "Stop-loss | {}\n"
         "Decision  | once per event, confirmed inventory, at most one market request\n\n",
-        price_text(scenario.strategy->buy_price_atoms), price_text(scenario.strategy->sell_price_atoms)));
+        price_text(scenario.strategy->buy_price_atoms), price_text(scenario.strategy->sell_price_atoms),
+        scenario.strategy->stop_loss_ppm == 0 ? std::string("off")
+            : std::format("sell at market when position value is {} ppm below cost", scenario.strategy->stop_loss_ppm)));
     const auto submit = [&](const MarketOrder& order) {
         const auto report = manager.submit(order);
         paper_order(report);
@@ -50,8 +53,11 @@ void paper_session(std::string_view session_path, std::string_view scenario_path
                 simulator.executable_level(Side::sell), simulator.executable_level(Side::buy),
                 account.balances(), account.position()});
             if (order) {
-                write_console(std::format("Signal    | event #{} | {} threshold reached\n", event.time.ordinal,
-                    order->side == Side::buy ? "BUY ask" : "SELL bid"));
+                const auto signal = algorithm->last_signal();
+                write_console(std::format("Signal    | event #{} | {}\n", event.time.ordinal,
+                    signal == strategy::Signal::buy ? "BUY ask threshold reached"
+                    : signal == strategy::Signal::stop_loss ? "STOP-LOSS position value fell below the limit"
+                    : "SELL bid threshold reached"));
                 submit(*order);
             }
             return;

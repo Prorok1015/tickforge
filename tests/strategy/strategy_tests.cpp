@@ -60,6 +60,29 @@ int main()
         check(order && order->side == Side::sell && order->quantity_atoms == 50000);
         ++held.time.ordinal; held.bid = Level{10211, 999};
         check(!careful.on_market(held)); // Less than one quantity step is available.
+        check(careful.last_signal() == strategy::Signal::none);
+
+        // Stop-loss at 1% (10000 ppm) below the same 102.00 average cost:
+        // limit = ceil(20400000 * 0.99) = 20196000 atoms, i.e. a bid of 100.98.
+        strategy::ThresholdConfig stop_config{10000, 10200, 200000, 1000000000, 1000, 1000, 10000};
+        strategy::Threshold stopping(stop_config);
+        held.time.ordinal = 1; held.bid = Level{10099, 1000};
+        check(!stopping.on_market(held)); // 20198000 > limit: keep waiting.
+        ++held.time.ordinal; held.bid = Level{10098, 1000};
+        order = stopping.on_market(held);
+        check(order && order->side == Side::sell && order->quantity_atoms == 200000 &&
+              stopping.last_signal() == strategy::Signal::stop_loss); // Whole position, not capped by the thin bid.
+        ++held.time.ordinal; held.bid = Level{10300, 1000000}; held.ask = Level{10400, 1000000};
+        order = stopping.on_market(held);
+        check(order && order->quantity_atoms == 200000 && stopping.last_signal() == strategy::Signal::take_profit);
+        stop_config.stop_loss_ppm = 0;
+        strategy::Threshold unprotected(stop_config);
+        held.time.ordinal = 1; held.bid = Level{5000, 1000000}; held.ask = Level{5100, 1000000};
+        check(!unprotected.on_market(held)); // Without a stop the policy holds at any loss.
+        threw = false;
+        stop_config.stop_loss_ppm = 1000000;
+        try { strategy::Threshold bad(stop_config); } catch (const std::runtime_error&) { threw = true; }
+        check(threw);
         return 0;
     } catch (const std::exception& error) { std::fprintf(stderr, "%s\n", error.what()); return 1; }
 }
