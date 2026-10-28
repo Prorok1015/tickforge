@@ -48,6 +48,7 @@ tickforge/
       paper_command.cpp            offline paper trading command
       paper_scenario.*             scheduled requests/configuration parser
       paper_reporter.*             virtual-order/account journal
+      paper_export.*               machine-readable order/fill/summary CSV reports
   tests/
     CMakeLists.txt
     core/                          session, synchronization, and book contracts
@@ -211,7 +212,8 @@ liquidity counters. `order_manager.hpp/.cpp` performs risk checks, reserves fund
 calls the executor, validates confirmed results, and commits them to the account.
 
 The app's `paper_command.cpp` connects these pieces; `paper_scenario.*` reads
-experimental inputs, and `paper_reporter.*` prints the operation journal. No new
+experimental inputs, `paper_reporter.*` prints the operation journal, and
+`paper_export.*` optionally writes the CSV reports. No new
 network or console dependency is introduced into the ledger/execution libraries.
 See [paper trading](paper-trading.md) for units, scenario syntax, assumptions,
 example balances, PnL rules, and failure behavior.

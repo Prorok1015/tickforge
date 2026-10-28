@@ -14,8 +14,9 @@ void usage(std::string_view program, std::FILE* stream = stdout)
 {
     write_console(std::format(
         "Usage     | {} replay SESSION\n"
-        "Paper     | {} paper SESSION SCENARIO\n"
-        "Strategy  | {} strategy SESSION CONFIG\n"
+        "Paper     | {} paper SESSION SCENARIO [REPORT_PREFIX]\n"
+        "Strategy  | {} strategy SESSION CONFIG [REPORT_PREFIX]\n"
+        "Reports   | REPORT_PREFIX-orders.csv, -fills.csv, -summary.csv (new files only)\n"
         "Capture   | {} capture NEW_SESSION [SECONDS] (requires live-enabled build)\n",
         program, program, program, program), stream);
 }
@@ -40,10 +41,10 @@ int dispatch(int argc, char* argv[])
         replay_session(argv[2]);
     } else if (std::string_view(argv[1]) == "capture" && (argc == 3 || argc == 4)) {
         capture_session(argv[2], argc == 4 ? duration(argv[3]) : 30);
-    } else if (std::string_view(argv[1]) == "paper" && argc == 4) {
-        paper_session(argv[2], argv[3]);
-    } else if (std::string_view(argv[1]) == "strategy" && argc == 4) {
-        paper_session(argv[2], argv[3], true);
+    } else if (std::string_view(argv[1]) == "paper" && (argc == 4 || argc == 5)) {
+        paper_session(argv[2], argv[3], false, argc == 5 ? argv[4] : "");
+    } else if (std::string_view(argv[1]) == "strategy" && (argc == 4 || argc == 5)) {
+        paper_session(argv[2], argv[3], true, argc == 5 ? argv[4] : "");
     } else {
         usage(program, stderr);
         return 2;

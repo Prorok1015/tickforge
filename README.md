@@ -127,7 +127,7 @@ Checked items below are implemented; unchecked items remain planned.
 - [x] Add cost basis and realized/unrealized PnL.
 - [x] Add position and order-size limits.
 - [x] Print an operation journal and final account summary.
-- [ ] Export a machine-readable trade journal and session summary.
+- [x] Export a machine-readable trade journal and session summary.
 
 **First milestone of a complete system:** record a market session, replay it, and execute virtual market orders with explicit liquidity and fee assumptions.
 
@@ -254,8 +254,10 @@ trusted bid (65000.00), the result is **-0.79851350 USDT**: -0.39757401 realized
 "args": ["paper", "examples/synthetic-book.csv", "examples/paper-orders.csv"]
 ```
 
-See [paper trading](docs/paper-trading.md) for scenario units, fee rounding,
-liquidity assumptions, and the separate accounting/execution components.
+Add a report prefix such as `reports/example` after the scenario to also write
+machine-readable order, fill, and summary CSV files. See [paper trading](docs/paper-trading.md)
+for scenario units, fee rounding, report files, liquidity assumptions, and the separate
+accounting/execution components.
 
 For a release build, use a separate directory:
 

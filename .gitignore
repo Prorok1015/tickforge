@@ -72,6 +72,8 @@ Testing/
 
 # Private local market recordings (provider redistribution rights are separate)
 /recordings/
+# Reports derived from experiments, often from private recordings
+/reports/
 
 # Preset build output and machine-specific CMake overrides
 /out/

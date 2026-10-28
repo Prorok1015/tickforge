@@ -1,0 +1,36 @@
+#pragma once
+#include "paper_reporter.hpp"
+#include <cstdio>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+
+namespace tickforge::app {
+struct PaperTotals {
+    std::int64_t events = 0;
+    std::size_t requests = 0;
+    std::size_t rejected = 0;
+    std::size_t fills = 0;
+    std::int64_t fees = 0;
+};
+
+// Machine-readable experiment output in integer atoms. <prefix>-orders.csv and
+// <prefix>-fills.csv grow during the run; <prefix>-summary.csv is created last and
+// ends with "status,complete", so only that row confirms a completed experiment.
+// All three files must be new: an existing experiment is never overwritten.
+class PaperExport {
+public:
+    explicit PaperExport(std::string_view prefix);
+    void order(const MarketEvent& event, std::string_view signal, const execution::OrderReport& report);
+    void complete(std::string_view command, std::string_view session, std::string_view scenario_path,
+                  const PaperScenario& scenario, const accounting::Account& account,
+                  const PaperTotals& totals, std::optional<Mark> mark);
+    const std::string& summary_path() const { return summary_path_; }
+private:
+    struct Close { void operator()(std::FILE* file) const { std::fclose(file); } };
+    using File = std::unique_ptr<std::FILE, Close>;
+    std::string orders_path_, fills_path_, summary_path_;
+    File orders_, fills_;
+};
+} // namespace tickforge::app

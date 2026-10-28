@@ -41,6 +41,43 @@ The total is the change in equity: 999.20148650 - 1000 USDT. It is a result unde
 the stated execution assumptions, not evidence of a profitable method. Redirect
 stdout to a local log if you want to save the human-readable operation journal.
 
+## Machine-readable reports
+
+Both `paper` and `strategy` accept an optional report prefix:
+
+```sh
+mkdir -p reports
+./build/tickforge paper examples/synthetic-book.csv examples/paper-orders.csv reports/example
+```
+
+This writes three CSV files next to the console journal. All values are integers in
+the units below (price 1e-2 USDT, BTC and USDT amounts 1e-8); no decimals are formatted.
+
+| File | Rows |
+| --- | --- |
+| `PREFIX-orders.csv` | One per request, including rejections: event, time, order, signal (`script`, `buy`, `take_profit`, `stop_loss`), side, request, status, filled/remaining quantity, fills, fees, and balances, cost basis, and realized PnL after the request, then the reason. |
+| `PREFIX-fills.csv` | One per confirmed fill: event, time, order, fill ID, side, price, quantity, notional, fee. |
+| `PREFIX-summary.csv` | `key,value` rows: format and version, inputs (session, scenario, account, every execution and strategy parameter, units), counts, final balances and PnL, mark, and `status,complete` last. |
+
+Rules that keep experiments comparable and honest:
+
+- **Inputs are recorded with results.** A summary lists every parameter that
+  produced it, so it can be reproduced from the same session file without guessing.
+- **Nothing is overwritten.** All three files must be new; an existing report fails
+  the run before any market event is processed.
+- **Completion is explicit.** Order and fill journals grow during the run. The
+  summary is created only after both are closed, and its last row is
+  `status,complete`. A failed run leaves journals without a summary; treat them as
+  incomplete, like a recording without its footer.
+- **Unavailable is empty, not zero.** If BTC is held and no trusted bid was ever
+  seen, the mark and valuation fields are empty.
+- Text fields use standard CSV quoting only when needed (for example a path with a
+  comma). The files have a header row and load directly into spreadsheet or
+  dataframe tools.
+
+Reports from private recordings are derived market data; keep them under the
+ignored `reports/` or `recordings/` directory.
+
 ## Component boundaries
 
 ```mermaid
