@@ -23,7 +23,7 @@ void live_session(const LiveOptions& options)
     // The full-screen view needs a terminal; piped output gets the plain journal.
     const bool screen = !options.plain && isatty(fileno(stdout)) == 1;
     PaperJournal journal(scenario, exporter, {.journal = !screen, .market_lines = false});
-    LiveDashboard dashboard(scenario, journal, static_cast<std::int64_t>(options.seconds) * 1000000000, 10);
+    LiveDashboard dashboard(scenario, journal, static_cast<std::int64_t>(options.seconds) * 1000000000);
     engine::SessionObserver& observer = screen ? static_cast<engine::SessionObserver&>(dashboard) : journal;
     engine::Session session({scenario.config, scenario.risk, scenario.initial_quote_atoms, scenario.initial_base_atoms,
                              scenario.initial_base_cost_atoms}, make_strategy(scenario), observer);

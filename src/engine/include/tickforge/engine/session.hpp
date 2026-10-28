@@ -70,6 +70,8 @@ public:
     // The recorded book as the simulator knows it, and this account's unfinished orders.
     const OrderBook& book() const { return simulator_.book(); }
     std::vector<execution::OpenOrder> open_orders() const { return manager_.open_orders(); }
+    // Estimated size ahead of a resting order in its price queue (presentation only).
+    std::optional<std::int64_t> queue_ahead(std::int64_t order_id) const { return simulator_.queue_ahead(order_id); }
 private:
     void submit_at(const EventTime& time, const Order& order, std::string_view signal);
     void collect();

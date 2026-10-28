@@ -29,11 +29,23 @@ virtual funds. No order leaves the machine; there are still no keys.
   before the engine sees it, so the recording holds precisely what the strategy saw.
 - `--report` writes the same CSV reports as offline runs, with `command,live`.
 - In a terminal the run is a full-screen view redrawn in place, about five times per
-  second of session time: the top ten levels of each side with our resting orders
-  marked, balances (total, reserved, available), cost, realized and unrealized PnL,
-  equity, risk state, open orders, fill evidence, and recent signals, fills, and feed
-  notes. The final summary is printed after the view closes. `--plain`, or output
-  that is not a terminal, prints the journal lines instead, without a line per event.
+  second of session time. Its panels answer, from top to bottom, the questions a
+  person watching asks:
+  - **RESULT**: how am I doing? Total profit in USDT and percent of the starting
+    money, split into closed trades and the open position, plus round trips and fees.
+  - **BOT**: what is the bot doing and why? Each open order in plain words: waiting
+    to buy or sell at a price, our estimated place in the queue when we are the best
+    price, or how far the market has to move to reach an order that it moved away
+    from. Then the strategy's rules.
+  - **MARKET**: five price levels per side with size bars, our resting orders marked
+    beside their level, and a note for our orders outside the shown levels.
+  - **WALLET**: USDT and BTC with the free and the locked (reserved) parts, and the
+    average purchase price while holding BTC.
+  - **ACTIVITY**: the latest events as sentences: placed, bought, sold (and whether
+    our order was hit or we took the price), cancels, risk stops, and feed status.
+
+  The final summary is printed after the view closes. `--plain`, or output that is
+  not a terminal, prints the journal lines instead, without a line per event.
 
 **Replay equals live.** The engine reads no clock: decisions, latency, and risk use
 only the receive offsets stored in the events. Replaying the recording with the same
