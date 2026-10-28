@@ -115,6 +115,7 @@ CMake carries that link requirement automatically.
 | `book_tracker.hpp` / `.cpp` | Decides when the book may be exposed. Buffers depth around REST snapshots, establishes a stream bridge, and hides quotes after resets/gaps. |
 | `recorder.hpp` / `.cpp` | Creates a new recording exclusively, writes normalized events in order, flushes them, and marks successful completion with a footer. |
 | `replay.hpp` / `.cpp` | Reads and validates v1/v2/v3 sessions; invokes a callback once per event in recorded order. No sleeping or network access. |
+| `units.hpp` / `.cpp` | Exact parsing of human-readable prices, BTC/USDT amounts, percentages, and durations into integer atoms. No floating point and no silent rounding. |
 
 `OrderBook` answers **what levels are known?** `BookTracker` answers **can consumers
 use those levels now?** This distinction prevents a REST snapshot from looking

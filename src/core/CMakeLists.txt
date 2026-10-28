@@ -6,7 +6,9 @@ add_library(tickforge_core
     include/tickforge/core/book_tracker.hpp
     include/tickforge/core/replay.hpp
     include/tickforge/core/recorder.hpp
+    include/tickforge/core/units.hpp
     src/order_book.cpp
+    src/units.cpp
     src/amounts.cpp
     src/book_tracker.cpp
     src/replay.cpp
