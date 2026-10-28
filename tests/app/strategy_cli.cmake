@@ -93,7 +93,7 @@ endforeach()
 file(READ "${reports}/first-orders.csv" orders)
 file(READ "${reports}/first-summary.csv" summary)
 foreach(expected IN ITEMS "1,0,1,buy,buy,200000,1000000000,1,partially_filled,100000,100000,1,10000,"
-        "3,200,2,take_profit,sell,100000,0,1,filled,100000,0,1,10200,10000179800,0,0,179800,filled\n")
+        "3,200,2,take_profit,sell,100000,0,1,filled,100000,0,1,10200,10000179800,0,0,179800,200,200,none,filled\n")
     string(FIND "${orders}" "${expected}" position)
     if(position EQUAL -1)
         message(FATAL_ERROR "Strategy order journal missing: ${expected}\n${orders}")
@@ -118,6 +118,27 @@ file(READ "${reports}/second-summary.csv" second)
 string(REPLACE "second-" "first-" second "${second}")
 if(NOT "${summary}" STREQUAL "${second}")
     message(FATAL_ERROR "Strategy summary must be deterministic")
+endif()
+# Latency: the buy decided at event #1 (t=0) executes at t=150, after the reset at t=100,
+# so it is cancelled for lack of a trusted book and counted, not silently dropped.
+set(delayed "${reports}/delayed.csv")
+string(REPLACE "config,1000,1000,1000000,1000000,5000000000" "config,1000,1000,1000000,1000000,5000000000,150,0"
+    delayed_config "${config}")
+file(WRITE "${delayed}" "${delayed_config}")
+execute_process(COMMAND "${PROGRAM}" strategy "${SESSION}" "${delayed}" "${reports}/delayed"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+file(READ "${reports}/delayed-summary.csv" summary)
+file(READ "${reports}/delayed-orders.csv" orders)
+foreach(expected IN ITEMS "order_latency_ns,150\nreport_latency_ns,0\n" "requests,1\nrejected,0\nfills,0\n"
+        "cancelled_no_trusted_book,1\ncancelled_session_ended,0\n" "realized_pnl_quote_atoms,0\n")
+    string(FIND "${summary}" "${expected}" position)
+    if(NOT "${result}" STREQUAL "0" OR position EQUAL -1)
+        message(FATAL_ERROR "Delayed summary missing: ${expected}\n${summary}\n${output}\n${error}")
+    endif()
+endforeach()
+if(NOT orders MATCHES ",150,150,no_trusted_book,no trusted book at execution time; order cancelled\n"
+        OR NOT output MATCHES "Sent      \\| order #1 \\| elapsed=0 ns")
+    message(FATAL_ERROR "Cancelled in-flight order must be journaled: ${orders}\n${output}")
 endif()
 # Holding BTC without any trusted bid: unrealized PnL is unavailable, not guessed.
 set(no_quotes "${reports}/no-quotes.csv")

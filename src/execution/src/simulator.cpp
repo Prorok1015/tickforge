@@ -21,7 +21,8 @@ std::int64_t fee(std::int64_t quote, std::int64_t ppm)
 void validate_config(const PaperConfig& config)
 {
     if (config.fee_ppm < 0 || config.fee_ppm > 1000000 || config.quantity_step_atoms <= 0 ||
-        config.max_order_quantity_atoms <= 0 || config.max_position_quantity_atoms <= 0 || config.stale_after_ns < 0)
+        config.max_order_quantity_atoms <= 0 || config.max_position_quantity_atoms <= 0 || config.stale_after_ns < 0 ||
+        config.order_latency_ns < 0 || config.report_latency_ns < 0)
         throw std::invalid_argument("invalid paper trading configuration");
 }
 
@@ -32,6 +33,9 @@ void Simulator::on_market_event(const MarketEvent& event)
     if (ordinal_ == std::numeric_limits<std::int64_t>::max() || event.time.ordinal != ordinal_ + 1 ||
         event.time.receive_elapsed_ns < now_ns_)
         throw std::runtime_error("invalid simulator event order/time");
+    if (finished_) throw std::runtime_error("simulator already finished");
+    // The book still shows every event up to the due time: execute before applying this one.
+    run_due(event.time.receive_elapsed_ns);
     ordinal_ = event.time.ordinal;
     now_ns_ = event.time.receive_elapsed_ns;
     std::visit([&](const auto& data) {
@@ -56,19 +60,57 @@ void Simulator::on_market_event(const MarketEvent& event)
     }, event.data);
 }
 
-bool Simulator::available() const
+bool Simulator::available() const { return available_at(now_ns_); }
+
+bool Simulator::available_at(std::int64_t time) const
 {
-    return tracker_.view().synchronized() && last_fresh_ns_ && now_ns_ - *last_fresh_ns_ <= config_.stale_after_ns;
+    return tracker_.view().synchronized() && last_fresh_ns_ && time - *last_fresh_ns_ <= config_.stale_after_ns;
 }
 
 void Simulator::submit(const MarketOrder& order)
 {
-    reports_.push_back({execute(order), now_ns_, now_ns_});
+    if (finished_) throw std::runtime_error("simulator already finished");
+    const auto due = amount_add(now_ns_, config_.order_latency_ns);
+    if (config_.order_latency_ns == 0) {
+        reports_.push_back({execute(order), now_ns_, amount_add(now_ns_, config_.report_latency_ns)});
+        return;
+    }
+    in_flight_.push_back({order, due});
+}
+
+void Simulator::run_due(std::int64_t before_ns)
+{
+    while (!in_flight_.empty() && in_flight_.front().due_ns < before_ns) {
+        const auto [order, due] = in_flight_.front();
+        in_flight_.pop_front();
+        if (!available_at(due)) cancel(order, due, Interruption::no_trusted_book);
+        else reports_.push_back({execute_at(order, due), due, amount_add(due, config_.report_latency_ns)});
+    }
+}
+
+void Simulator::cancel(const MarketOrder& order, std::int64_t time, Interruption why)
+{
+    const auto reason = why == Interruption::no_trusted_book ? "no trusted book at execution time; order cancelled"
+                                                              : "market data ended before execution; order cancelled";
+    reports_.push_back({{order.id, OrderStatus::cancelled, {}, order.quantity_atoms, reason}, time,
+                        amount_add(time, config_.report_latency_ns), why});
 }
 
 std::vector<ExecutionReport> Simulator::take_reports()
 {
-    return std::exchange(reports_, {});
+    // Reports are produced in execution order with a fixed delay, so they are sorted by report time.
+    const auto ready = finished_ ? reports_.end() : std::find_if(reports_.begin(), reports_.end(),
+        [&](const ExecutionReport& report) { return report.reported_ns > now_ns_; });
+    std::vector<ExecutionReport> result(std::make_move_iterator(reports_.begin()), std::make_move_iterator(ready));
+    reports_.erase(reports_.begin(), ready);
+    return result;
+}
+
+void Simulator::finish()
+{
+    for (const auto& pending : in_flight_) cancel(pending.order, now_ns_, Interruption::session_ended);
+    in_flight_.clear();
+    finished_ = true;
 }
 
 std::optional<Level> Simulator::executable_level(Side side) const
@@ -84,7 +126,9 @@ std::optional<Level> Simulator::executable_level(Side side) const
     return std::nullopt;
 }
 
-ExecutionResult Simulator::execute(const MarketOrder& order)
+ExecutionResult Simulator::execute(const MarketOrder& order) { return execute_at(order, now_ns_); }
+
+ExecutionResult Simulator::execute_at(const MarketOrder& order, std::int64_t time)
 {
     ExecutionResult result{order.id, OrderStatus::rejected, {}, order.quantity_atoms, ""};
     if (order.id <= 0 || order.quantity_atoms <= 0 || order.quantity_atoms % config_.quantity_step_atoms != 0 ||
@@ -94,7 +138,7 @@ ExecutionResult Simulator::execute(const MarketOrder& order)
         result.reason = "invalid market order";
         return result;
     }
-    if (!available()) { result.reason = "book unavailable or stale"; return result; }
+    if (!available_at(time)) { result.reason = "book unavailable or stale"; return result; }
     const auto levels = order.side == Side::buy ? book().ask_depth() : book().bid_depth();
     auto consumed = order.side == Side::buy ? consumed_asks_ : consumed_bids_;
     auto next_id = next_fill_id_;

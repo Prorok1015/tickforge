@@ -53,8 +53,12 @@ PaperScenario load_paper_scenario(std::string_view path)
                     throw std::runtime_error("initial BTC requires its cost basis in USDT atoms");
                 if (result.initial_base_atoms == 0 && result.initial_base_cost_atoms != 0)
                     throw std::runtime_error("cost basis requires initial BTC");
-            } else if (number == 3 && values.size() == 6 && values[0] == "config") {
+            } else if (number == 3 && (values.size() == 6 || values.size() == 8) && values[0] == "config") {
                 result.config = {integer(values[1]), integer(values[2]), integer(values[3]), integer(values[4]), integer(values[5])};
+                if (values.size() == 8) {
+                    result.config.order_latency_ns = integer(values[6]);
+                    result.config.report_latency_ns = integer(values[7]);
+                }
                 execution::validate_config(result.config);
             } else if (number == 4 && values.size() >= 5 && values.size() <= 7 && values[0] == "threshold") {
                 result.strategy = strategy::ThresholdConfig{integer(values[1]), integer(values[2]),

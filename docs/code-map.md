@@ -209,8 +209,9 @@ reservations, receipt deduplication, average cost basis, and realized PnL.
 unrealized/total PnL, equity, and average cost. They are pure functions of the ledger.
 `execution/execution.hpp` defines the asynchronous interface (`submit`, then
 `take_reports` with execution and report times) and explicit paper settings.
-`simulator.hpp/.cpp` consumes replay events, guards book freshness, and simulates
-fills using separate virtual liquidity counters. `order_manager.hpp/.cpp` performs
+`simulator.hpp/.cpp` consumes replay events, guards book freshness, delays execution
+and reports by the configured latencies, and simulates fills using separate virtual
+liquidity counters. `order_manager.hpp/.cpp` performs
 risk checks, reserves funds, and submits; `collect()` later validates confirmed
 results and commits them to the account.
 

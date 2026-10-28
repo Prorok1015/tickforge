@@ -17,6 +17,7 @@ struct OrderReport {
     accounting::Position final_position;
     std::int64_t executed_ns = 0; // session time; zero for requests rejected before execution
     std::int64_t reported_ns = 0;
+    Interruption interruption = Interruption::none;
 };
 
 // Lifecycle: submit() validates, reserves, and hands the order to execution. The

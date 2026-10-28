@@ -13,6 +13,8 @@ struct PaperTotals {
     std::size_t rejected = 0;
     std::size_t fills = 0;
     std::int64_t fees = 0;
+    std::size_t cancelled_no_book = 0; // accepted, but no trusted book at execution time
+    std::size_t cancelled_at_end = 0;  // accepted, but market data ended first
 };
 
 // Machine-readable experiment output in integer atoms. <prefix>-orders.csv and

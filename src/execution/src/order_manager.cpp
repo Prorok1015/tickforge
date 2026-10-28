@@ -73,6 +73,6 @@ OrderReport OrderManager::commit(ExecutionReport report)
     const auto reserved = found->second.reserved;
     pending_.erase(found);
     return {order, true, std::move(result), reserved, account_.balances(), account_.position(),
-            report.executed_ns, report.reported_ns};
+            report.executed_ns, report.reported_ns, report.interruption};
 }
 } // namespace tickforge::execution

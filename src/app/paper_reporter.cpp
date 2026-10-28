@@ -47,13 +47,14 @@ void paper_header(std::string_view session, std::string_view scenario, const Pap
     write_console(std::format(
         "tickforge | Paper trading (offline, virtual funds only)\n"
         "Market    | {}\nScenario  | {}\n"
-        "Execution | market orders, zero latency, unfilled remainder cancelled\n"
+        "Execution | market orders, unfilled remainder cancelled\n"
+        "Latency   | order={} ns (decision -> execution) | report={} ns (execution -> confirmed result)\n"
         "Fee       | {} ppm in USDT (configured assumption, not a live venue fee)\n"
         "Limits    | order={} BTC | position={} BTC | quantity step={} BTC | stale after={} ns\n"
         "Liquidity | consumed virtually; only explicit level updates or snapshots replenish it\n"
         "Initial   | {} USDT | {} BTC | BTC cost basis={} USDT\n"
         "PnL       | average cost; buy fees in cost, sell fees in proceeds; marked at last trusted bid\n\n",
-        session, scenario, settings.config.fee_ppm,
+        session, scenario, settings.config.order_latency_ns, settings.config.report_latency_ns, settings.config.fee_ppm,
         quantity_text(settings.config.max_order_quantity_atoms), quantity_text(settings.config.max_position_quantity_atoms),
         quantity_text(settings.config.quantity_step_atoms), settings.config.stale_after_ns,
         money(settings.initial_quote_atoms), quantity_text(settings.initial_base_atoms),

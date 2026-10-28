@@ -86,8 +86,8 @@ execute_process(COMMAND "${PROGRAM}" paper "${SESSION}" "${comma_scenario}" "${r
 file(READ "${reports}/run-orders.csv" orders)
 file(READ "${reports}/run-summary.csv" summary)
 foreach(expected IN ITEMS
-        "4,300,6,script,buy,100000,10000000000,0,rejected,0,100000,0,0,60933448950,600000,39039975974,-26575076,book unavailable or stale\n"
-        "8,700,8,script,sell,100000,0,1,filled,100000,0,1,6500000,60920148650,600000,39040093949,-39757401,filled\n")
+        "4,300,6,script,buy,100000,10000000000,0,rejected,0,100000,0,0,60933448950,600000,39039975974,-26575076,,,none,book unavailable or stale\n"
+        "8,700,8,script,sell,100000,0,1,filled,100000,0,1,6500000,60920148650,600000,39040093949,-39757401,700,700,none,filled\n")
     string(FIND "${orders}" "${expected}" position)
     if(NOT "${result}" STREQUAL "0" OR position EQUAL -1)
         message(FATAL_ERROR "Order journal missing: ${expected}\n${orders}\n${error}")

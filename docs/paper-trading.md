@@ -55,9 +55,9 @@ the units below (price 1e-2 USDT, BTC and USDT amounts 1e-8); no decimals are fo
 
 | File | Rows |
 | --- | --- |
-| `PREFIX-orders.csv` | One per request, including rejections: event, time, order, signal (`script`, `buy`, `take_profit`, `stop_loss`), side, request, status, filled/remaining quantity, fills, fees, and balances, cost basis, and realized PnL after the request, then the reason. |
-| `PREFIX-fills.csv` | One per confirmed fill: event, time, order, fill ID, side, price, quantity, notional, fee. |
-| `PREFIX-summary.csv` | `key,value` rows: format and version, inputs (session, scenario, account, every execution and strategy parameter, units), counts, final balances and PnL, mark, and `status,complete` last. |
+| `PREFIX-orders.csv` | One per request, including rejections, in report order: submitting event and time, order, signal (`script`, `buy`, `take_profit`, `stop_loss`), side, request, status, filled/remaining quantity, fills, fees, balances, cost basis, and realized PnL after the report, execution and report times (empty for requests rejected before execution), interruption (`none`, `no_trusted_book`, `session_ended`), then the reason. |
+| `PREFIX-fills.csv` | One per confirmed fill: submitting event and time, order, fill ID, side, price, quantity, notional, fee, execution time. |
+| `PREFIX-summary.csv` | `key,value` rows: format and version (currently 2), inputs (session, scenario, account, every execution parameter including latencies, strategy parameters, units), counts including cancelled in-flight orders, final balances and PnL, mark, and `status,complete` last. |
 
 Rules that keep experiments comparable and honest:
 
@@ -114,13 +114,15 @@ an unknown or inconsistent report keeps reservations and aborts the run.
 ```text
 tickforge-orders,1,BTCUSDT
 account,initial_quote_atoms,initial_base_atoms[,initial_base_cost_quote_atoms]
-config,fee_ppm,quantity_step_atoms,max_order_quantity_atoms,max_position_quantity_atoms,stale_after_ns
+config,fee_ppm,quantity_step_atoms,max_order_quantity_atoms,max_position_quantity_atoms,stale_after_ns[,order_latency_ns,report_latency_ns]
 order,after_event_ordinal,order_id,buy_or_sell,quantity_atoms,max_spend_quote_atoms
 ```
 
 The optional fourth `account` field is the total cost of the initial BTC in
 1e-8 USDT. It is required when the account starts with BTC and must be absent or
 zero otherwise, so inherited inventory never receives an implicit zero cost.
+The two optional latency fields of `config` come together; absent means zero (see
+[Latency](#latency)).
 The first three rows are mandatory and ordered. Subsequent order rows are processed
 in file order; event ordinals must be positive and nondecreasing, and order IDs must
 be positive and unique. All numeric fields contain nonnegative int64 decimal digits.
@@ -181,11 +183,11 @@ are not fully emulated in this stage.
    `partially_filled` is terminal here: the remaining quantity is cancelled.
 
 Steps 1-4 happen at submission. Steps 5-6 happen when the manager collects the
-execution report. With the current zero-latency simulator both occur within the
-event that submitted the order.
+execution report. With zero latency both occur within the event that submitted the
+order; with latency they are separated in session time (see below).
 
-No shorts, leverage, limit orders, resting orders, simulated delays, or daily-loss
-limits are implemented. A fresh sequence is not enough on its own: depth is
+No shorts, leverage, limit orders, resting orders, cancellation requests, or
+daily-loss limits are implemented. A fresh sequence is not enough on its own: depth is
 stale once the current replay offset exceeds the last valid depth observation by
 `stale_after_ns`. Trades and stale duplicate ranges do not refresh this observation.
 Gap/disconnect states and unbridged live snapshots block execution.
@@ -201,6 +203,49 @@ reservation and aborts the run. It must not assume that an uncertain request was
 rejected. A confirmed rejection, in contrast, releases the reservation. Recovering
 such an uncertain state through exchange reconciliation is a future real-execution
 task; no real adapter is supplied by this stage.
+
+## Latency
+
+Two fixed delays, in recorded session nanoseconds (`receive_elapsed_ns`), separate a
+decision from its consequences:
+
+```text
+t        decision; funds reserved                       ("Sent" in the journal)
+t + L1   execution at the venue: decides the price      (order_latency_ns)
+t + L1 + L2  report reaches us: balances, PnL, strategy  (report_latency_ns)
+```
+
+The recording already contains the delay of market data reaching us, because its
+times are receive times. The model adds what a recording cannot show: our processing
+and the order's trip to the venue (`L1`), and the confirmation's trip back (`L2`).
+Both are experimental assumptions. Measure a real round trip with ping/pong or a
+venue time request; `exchange_ns - receive_unix_ns` is not a latency measurement
+because two different clocks produce it.
+
+**Which book an order meets.** Events arrive only when the book changes, so the book
+at `t + L1` is the book after the last event at or before `t + L1`. When replay
+reaches the first event later than `t + L1`, the order executes first, against the
+book not yet updated by that event, and then the event is applied. Waiting for a
+later event would execute against a future book. With `L1 = 0` the order executes
+at submission against the current book, as before.
+
+**While an order is in flight** its reservation stays open, so the strategy makes no
+decisions, and scripted orders still apply position limits to pending buys.
+Staleness is judged at `t + L1`: depth older than `stale_after_ns` at that moment
+counts as untrusted.
+
+**Cancellations.** The venue would execute an order even if our feed broke, but
+without a trusted book we cannot price it. Such an order is cancelled with
+interruption `no_trusted_book`. An order still in flight when market data ends is
+cancelled with `session_ended`. Both release the reservation and are counted in the
+summary (`cancelled_no_trusted_book`, `cancelled_session_ended`). The first rule is
+optimistic: in reality the order might have filled at a poor price, so a high count
+means the result is less reliable. An order that executed before the data ended
+still reports, even if its report time lies beyond the end.
+
+Not modelled: random or load-dependent delays, faster participants taking the levels
+we saw, and our order's effect on others. In a fast market a delayed market order in
+the direction of the move can look better in simulation than it would be in reality.
 
 ## Cost basis and PnL
 

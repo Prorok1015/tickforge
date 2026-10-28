@@ -36,6 +36,16 @@ std::string_view status_name(OrderStatus status)
 
 std::string_view side_name(Side side) { return side == Side::buy ? "buy" : "sell"; }
 
+std::string_view interruption_name(execution::Interruption interruption)
+{
+    switch (interruption) {
+    case execution::Interruption::none: return "none";
+    case execution::Interruption::no_trusted_book: return "no_trusted_book";
+    case execution::Interruption::session_ended: return "session_ended";
+    }
+    return "unknown";
+}
+
 void write(std::FILE* file, std::string_view text)
 {
     if (std::fwrite(text.data(), 1, text.size(), file) != text.size())
@@ -56,11 +66,13 @@ PaperExport::PaperExport(std::string_view prefix)
     };
     orders_ = create(orders_path_);
     fills_ = create(fills_path_);
-    write(orders_.get(), "event_ordinal,elapsed_ns,order_id,signal,side,quantity_atoms,max_spend_quote_atoms,"
+    // Times are recorded session offsets: submission, execution at the venue, report to us.
+    write(orders_.get(), "submitted_event_ordinal,submitted_ns,order_id,signal,side,quantity_atoms,max_spend_quote_atoms,"
         "accepted,status,filled_quantity_atoms,remaining_quantity_atoms,fill_count,fee_quote_atoms,"
-        "quote_total_atoms,base_total_atoms,cost_basis_quote_atoms,realized_pnl_quote_atoms,reason\n");
-    write(fills_.get(), "event_ordinal,elapsed_ns,order_id,fill_id,side,price_atoms,quantity_atoms,"
-        "quote_atoms,fee_quote_atoms\n");
+        "quote_total_atoms,base_total_atoms,cost_basis_quote_atoms,realized_pnl_quote_atoms,"
+        "executed_ns,reported_ns,interruption,reason\n");
+    write(fills_.get(), "submitted_event_ordinal,submitted_ns,order_id,fill_id,side,price_atoms,quantity_atoms,"
+        "quote_atoms,fee_quote_atoms,executed_ns\n");
 }
 
 void PaperExport::order(const EventTime& submitted, std::string_view signal, const execution::OrderReport& report)
@@ -69,17 +81,20 @@ void PaperExport::order(const EventTime& submitted, std::string_view signal, con
     std::int64_t fees = 0;
     for (const auto& fill : result.fills) {
         fees = amount_add(fees, fill.fee_quote_atoms);
-        write(fills_.get(), std::format("{},{},{},{},{},{},{},{},{}\n", submitted.ordinal, submitted.receive_elapsed_ns,
+        write(fills_.get(), std::format("{},{},{},{},{},{},{},{},{},{}\n", submitted.ordinal, submitted.receive_elapsed_ns,
             fill.order_id, fill.id, side_name(fill.side), fill.price_atoms, fill.quantity_atoms, fill.quote_atoms,
-            fill.fee_quote_atoms));
+            fill.fee_quote_atoms, report.executed_ns));
     }
     const auto& balances = report.final_balances;
-    write(orders_.get(), std::format("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+    // Execution and report times are empty for requests rejected before execution.
+    const auto time = [&](std::int64_t value) { return report.accepted ? std::format("{}", value) : std::string(); };
+    write(orders_.get(), std::format("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
         submitted.ordinal, submitted.receive_elapsed_ns, report.order.id, signal, side_name(report.order.side),
         report.order.quantity_atoms, report.order.max_spend_quote_atoms, report.accepted ? 1 : 0,
         status_name(result.status), report.order.quantity_atoms - result.remaining_quantity_atoms,
         result.remaining_quantity_atoms, result.fills.size(), fees, balances.quote_total, balances.base_total,
-        report.final_position.base_cost_quote, report.final_position.realized_pnl_quote, csv(result.reason)));
+        report.final_position.base_cost_quote, report.final_position.realized_pnl_quote,
+        time(report.executed_ns), time(report.reported_ns), interruption_name(report.interruption), csv(result.reason)));
 }
 
 void PaperExport::complete(std::string_view command, std::string_view session, std::string_view scenario_path,
@@ -93,7 +108,7 @@ void PaperExport::complete(std::string_view command, std::string_view session, s
     std::vector<std::pair<std::string, std::string>> rows;
     const auto add = [&](std::string key, auto value) { rows.emplace_back(std::move(key), std::format("{}", value)); };
     add("format", "tickforge-paper-summary");
-    add("version", 1);
+    add("version", 2);
     add("command", command);
     add("session", csv(session));
     add("scenario", csv(scenario_path));
@@ -109,6 +124,8 @@ void PaperExport::complete(std::string_view command, std::string_view session, s
     add("max_order_quantity_atoms", scenario.config.max_order_quantity_atoms);
     add("max_position_quantity_atoms", scenario.config.max_position_quantity_atoms);
     add("stale_after_ns", scenario.config.stale_after_ns);
+    add("order_latency_ns", scenario.config.order_latency_ns);
+    add("report_latency_ns", scenario.config.report_latency_ns);
     if (const auto& s = scenario.strategy) {
         add("strategy", "threshold");
         add("buy_price_atoms", s->buy_price_atoms);
@@ -126,6 +143,8 @@ void PaperExport::complete(std::string_view command, std::string_view session, s
     add("rejected", totals.rejected);
     add("fills", totals.fills);
     add("fees_quote_atoms", totals.fees);
+    add("cancelled_no_trusted_book", totals.cancelled_no_book);
+    add("cancelled_session_ended", totals.cancelled_at_end);
     const auto& balances = account.balances();
     const auto& position = account.position();
     add("quote_total_atoms", balances.quote_total);

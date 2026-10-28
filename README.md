@@ -133,7 +133,8 @@ Checked items below are implemented; unchecked items remain planned.
 
 ### 4. More realistic execution
 
-- [ ] Model order submission and cancellation delays.
+- [x] Model order submission and report delays.
+- [ ] Model cancellation delays (once resting orders exist).
 - [x] Make the execution interface asynchronous: orders are submitted, and their
   confirmed terminal results are reported later instead of returned at once.
 - [ ] Add limit orders, partial fills, and queue assumptions.

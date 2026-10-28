@@ -61,6 +61,8 @@ void paper_session(std::string_view session_path, std::string_view scenario_path
         paper_order(report);
         if (exporter) exporter->order(submitted, signal, report);
         if (report.result.status == OrderStatus::rejected) ++totals.rejected;
+        if (report.interruption == execution::Interruption::no_trusted_book) ++totals.cancelled_no_book;
+        if (report.interruption == execution::Interruption::session_ended) ++totals.cancelled_at_end;
         totals.fills += report.result.fills.size();
         for (const auto& fill : report.result.fills) totals.fees = amount_add(totals.fees, fill.fee_quote_atoms);
     };
@@ -76,8 +78,14 @@ void paper_session(std::string_view session_path, std::string_view scenario_path
     };
     const auto submit = [&](const MarketEvent& event, const MarketOrder& order, std::string_view signal) {
         ++totals.requests;
-        if (const auto rejected = manager.submit(order)) record(*rejected, event.time, signal);
-        else in_flight.emplace(order.id, std::pair{event.time, signal});
+        if (const auto rejected = manager.submit(order)) {
+            record(*rejected, event.time, signal);
+        } else {
+            in_flight.emplace(order.id, std::pair{event.time, signal});
+            if (scenario.config.order_latency_ns != 0 || scenario.config.report_latency_ns != 0)
+                write_console(std::format("Sent      | order #{} | elapsed={} ns | funds reserved; result pending\n",
+                    order.id, event.time.receive_elapsed_ns));
+        }
         collect();
     };
     replay(input, [&](const MarketEvent& event) {
@@ -110,6 +118,10 @@ void paper_session(std::string_view session_path, std::string_view scenario_path
         }
     });
     if (!automatic && next != scenario.orders.size()) throw std::runtime_error("scenario references an event beyond the recorded session");
+    // Orders still in flight cannot execute without market data; executed ones still report.
+    simulator.finish();
+    collect();
+    if (manager.in_flight() != 0) throw std::runtime_error("orders remain unresolved after the session");
     paper_summary(account, totals.requests, totals.rejected, totals.fills, totals.fees, mark);
     if (exporter) {
         exporter->complete(automatic ? "strategy" : "paper", session_path, scenario_path, scenario, account, totals, mark);

@@ -164,6 +164,60 @@ void partial_sell()
           "empty book must not invent an execution price");
 }
 
+void latency()
+{
+    auto settings = config();
+    settings.stale_after_ns = 1000;
+    settings.order_latency_ns = 100;
+    settings.report_latency_ns = 50;
+    Simulator simulator(settings);
+    accounting::Account account(1000000000000, 0, 0);
+    OrderManager manager(account, simulator, settings);
+    simulator.on_market_event(event(1, BookSnapshot{1, {{9900, 100000000}}, {{10100, 100000000}}}, 0));
+    check(!manager.submit({1, Side::buy, 100000000, 20000000000}) && manager.collect().empty(),
+          "an accepted order is in flight, not executed");
+    const auto reserved = account.balances();
+    // The ask moves before the order arrives (t=50); an event exactly at the due time (t=100)
+    // is still part of the book the order meets.
+    simulator.on_market_event(event(2, BookUpdate{2, 2, {}, {{10100, 0}, {10200, 100000000}}}, 50));
+    simulator.on_market_event(event(3, BookUpdate{3, 3, {}, {{10200, 0}, {10300, 100000000}}}, 100));
+    check(manager.collect().empty() && account.balances() == reserved, "nothing executes before the due time passes");
+    // The first later event triggers execution against the book as of t=100, then is applied.
+    simulator.on_market_event(event(4, BookUpdate{4, 4, {}, {{10300, 0}, {10400, 100000000}}}, 101));
+    check(manager.collect().empty() && account.balances() == reserved, "the report is still on its way back");
+    simulator.on_market_event(event(5, Trade{10400, 1}, 150));
+    auto reports = manager.collect();
+    check(reports.size() == 1 && reports[0].result.fills.size() == 1 && reports[0].result.fills[0].price_atoms == 10300 &&
+          reports[0].executed_ns == 100 && reports[0].reported_ns == 150 && account.balances().base_total == 100000000,
+          "price from the book at execution time; balances change only when the report arrives");
+
+    // A disconnect while the order is in flight: no trusted book at execution, so it is cancelled.
+    check(!manager.submit({2, Side::sell, 100000000, 0}), "sell accepted");
+    simulator.on_market_event(event(6, BookReset{"disconnect"}, 200));
+    simulator.on_market_event(event(7, Trade{10400, 1}, 300));
+    reports = manager.collect();
+    check(reports.size() == 1 && reports[0].result.status == OrderStatus::cancelled && reports[0].result.fills.empty() &&
+          reports[0].interruption == Interruption::no_trusted_book && reports[0].executed_ns == 250 &&
+          account.balances().base_reserved == 0 && account.balances().base_total == 100000000,
+          "a cancelled in-flight order releases its reservation and changes no totals");
+
+    // Market data ends: an order not yet executed is cancelled; an executed one still reports.
+    simulator.on_market_event(event(8, BookSnapshot{8, {{9900, 100000000}}, {{10100, 100000000}}}, 400));
+    check(!manager.submit({3, Side::sell, 50000000, 0}), "first sell accepted");
+    simulator.on_market_event(event(9, BookUpdate{9, 9, {{9900, 100000000}}, {}}, 501));
+    check(!manager.submit({4, Side::sell, 50000000, 0}), "second sell accepted");
+    simulator.finish();
+    reports = manager.collect();
+    check(reports.size() == 2 && reports[0].order.id == 3 && reports[0].result.status == OrderStatus::filled &&
+          reports[0].reported_ns == 550 && reports[1].order.id == 4 &&
+          reports[1].interruption == Interruption::session_ended && reports[1].result.fills.empty() &&
+          manager.in_flight() == 0 && account.balances().base_total == 50000000 && account.balances().base_reserved == 0,
+          "end of data delivers executed reports and cancels unexecuted orders");
+    rejects([&] { simulator.on_market_event(event(10, Trade{1, 1}, 600)); });
+    settings.order_latency_ns = -1;
+    rejects([&] { Simulator invalid(settings); });
+}
+
 // Test executions answer each submitted order with a scripted result.
 class ScriptedExecution : public Execution {
 public:
@@ -234,6 +288,7 @@ int main()
 {
     try {
         routing_and_liquidity(); budget_and_rounding(); risk_and_freshness(); partial_sell(); uncertain_results();
+        latency();
         std::fputs("Execution, risk, and liquidity checks passed\n", stdout);
         return 0;
     } catch (const std::exception& error) {
