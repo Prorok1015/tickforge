@@ -1,5 +1,5 @@
 foreach(iteration RANGE 1 2)
-    execute_process(COMMAND "${PROGRAM}" strategy "${SESSION}" "${SCENARIO}"
+    execute_process(COMMAND "${PROGRAM}" strategy "${SESSION}" --config "${SCENARIO}"
         RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
     if(NOT "${result}" STREQUAL "0" OR NOT "${error}" STREQUAL "")
         message(FATAL_ERROR "Strategy failed: ${result}, ${error}\n${output}")
@@ -25,26 +25,22 @@ list(GET market_rows 0 market_header)
 list(GET market_rows 1 first_snapshot)
 set(prefix "${CMAKE_CURRENT_BINARY_DIR}/strategy-prefix.csv")
 file(WRITE "${prefix}" "${market_header}\n${first_snapshot}\nend,1\n")
-execute_process(COMMAND "${PROGRAM}" strategy "${prefix}" "${SCENARIO}"
+execute_process(COMMAND "${PROGRAM}" strategy "${prefix}" --config "${SCENARIO}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT "${result}" STREQUAL "0" OR NOT output MATCHES "1 requests"
         OR output MATCHES "SELL bid" OR NOT output MATCHES "total=0.00100000"
         OR NOT output MATCHES "unrealized=-0.00110000 USDT")
     message(FATAL_ERROR "Prefix replay must hold the partial buy without a future sell: ${output} ${error}")
 endif()
-execute_process(COMMAND "${PROGRAM}" paper "${SESSION}" "${SCENARIO}" RESULT_VARIABLE result)
+execute_process(COMMAND "${PROGRAM}" paper "${SESSION}" --config "${SCENARIO}" RESULT_VARIABLE result)
 if(NOT "${result}" STREQUAL "1")
     message(FATAL_ERROR "Script command must reject strategy configuration")
 endif()
-file(READ "${SCENARIO}" config)
-set(scratch "${CMAKE_CURRENT_BINARY_DIR}/strategy-invalid.csv")
 # Stop-loss: buy at 100.00, the bid drops to 98.00, the position is sold at a loss.
 # The policy is flat again, so the next event rebuys while ask <= 100.00 (no cooldown).
 set(falling "${CMAKE_CURRENT_BINARY_DIR}/strategy-falling.csv")
-set(stop_config "${CMAKE_CURRENT_BINARY_DIR}/strategy-stop.csv")
 file(WRITE "${falling}" "tickforge,3,BINANCE_SPOT,BTCUSDT,price_scale=100,quantity_scale=100000000\nsnapshot,1,0,1000000100,0,1,1,1,9900,1000000,10000,100000\nsnapshot,2,0,1000000200,100,2,1,1,9800,1000000,9900,1000000\ntrade,3,1000000350,1000000400,200,9900,1000\nend,3\n")
-file(WRITE "${stop_config}" "tickforge-orders,1,BTCUSDT\naccount,10000000000,0\nconfig,1000,1000,1000000,1000000,5000000000\nthreshold,10000,10200,200000,1000000000,10000\n")
-execute_process(COMMAND "${PROGRAM}" strategy "${falling}" "${stop_config}"
+execute_process(COMMAND "${PROGRAM}" strategy "${falling}" --config "${SCENARIO}" --set strategy.stop_loss=1%
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 foreach(expected IN ITEMS "Stop-loss | sell at market when position value is 10000 ppm below cost"
         "Signal    | event #2 | STOP-LOSS" "price=98.00 USDT | quantity=0.00100000 BTC"
@@ -56,26 +52,33 @@ foreach(expected IN ITEMS "Stop-loss | sell at market when position value is 100
 endforeach()
 # The same session with a 1000 ns cooldown: event #3 (elapsed 200) confirms the exit
 # and starts the pause, so the immediate rebuy disappears.
-file(WRITE "${stop_config}" "tickforge-orders,1,BTCUSDT\naccount,10000000000,0\nconfig,1000,1000,1000000,1000000,5000000000\nthreshold,10000,10200,200000,1000000000,10000,1000\n")
-execute_process(COMMAND "${PROGRAM}" strategy "${falling}" "${stop_config}"
+execute_process(COMMAND "${PROGRAM}" strategy "${falling}" --config "${SCENARIO}"
+    --set strategy.stop_loss=1% --set strategy.cooldown=1000ns
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 string(FIND "${output}" "Cooldown  | event #3 | stop-loss closed the position; no buys until elapsed=1200 ns" cooldown)
 if(NOT "${result}" STREQUAL "0" OR cooldown EQUAL -1 OR output MATCHES "event #3 \\| BUY"
         OR NOT output MATCHES "Paper complete \\| 2 requests")
     message(FATAL_ERROR "Cooldown must block the rebuy after a stop-loss: ${output} ${error}")
 endif()
-file(REMOVE "${falling}" "${stop_config}")
+file(REMOVE "${falling}")
 
-foreach(row IN ITEMS "threshold,10200,10000,200000,1000000000" "order,1,1,buy,1000,100000"
-        "threshold,10000,10200,1,1000000000" "threshold,10000,10200,200000,0"
-        "threshold,10000,10200,200000,1000000000,1000000" "threshold,10000,10200,200000,1000000000,0,5"
-        "threshold,10000,10200,200000,1000000000,1,2,3")
-    string(REGEX REPLACE "threshold,[^\n]+" "${row}" invalid "${config}")
-    file(WRITE "${scratch}" "${invalid}")
-    execute_process(COMMAND "${PROGRAM}" strategy "${SESSION}" "${scratch}"
+# Invalid strategy values are rejected naming the key.
+foreach(case IN ITEMS "strategy: invalid threshold|strategy.sell_above=99"
+        "strategy: invalid threshold|strategy.quantity=0.000001"
+        "strategy: invalid threshold|strategy.buy_budget=0"
+        "strategy: invalid threshold|strategy.stop_loss=100%"
+        "strategy: invalid threshold|strategy.cooldown=5ns"
+        "strategy.type: only|strategy.type=grid"
+        "strategy.buy_below: '100.001' has more than 2|strategy.buy_below=100.001")
+    string(FIND "${case}" "|" bar)
+    string(SUBSTRING "${case}" 0 ${bar} expected)
+    math(EXPR start "${bar} + 1")
+    string(SUBSTRING "${case}" ${start} -1 assignment)
+    execute_process(COMMAND "${PROGRAM}" strategy "${SESSION}" --config "${SCENARIO}" --set "${assignment}"
         RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
-    if(NOT "${result}" STREQUAL "1" OR output MATCHES "Paper complete")
-        message(FATAL_ERROR "Invalid strategy configuration accepted")
+    string(FIND "${error}" "${expected}" position)
+    if(NOT "${result}" STREQUAL "1" OR position EQUAL -1 OR output MATCHES "Paper complete")
+        message(FATAL_ERROR "Invalid strategy override '${assignment}' must fail naming '${expected}': ${error}")
     endif()
 endforeach()
 
@@ -84,7 +87,7 @@ set(reports "${CMAKE_CURRENT_BINARY_DIR}/strategy-reports")
 file(REMOVE_RECURSE "${reports}")
 file(MAKE_DIRECTORY "${reports}")
 foreach(run IN ITEMS first second)
-    execute_process(COMMAND "${PROGRAM}" strategy "${SESSION}" "${SCENARIO}" "${reports}/${run}"
+    execute_process(COMMAND "${PROGRAM}" strategy "${SESSION}" --config "${SCENARIO}" --report "${reports}/${run}"
         RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
     if(NOT "${result}" STREQUAL "0" OR NOT output MATCHES "Report    \\| ")
         message(FATAL_ERROR "Strategy report failed: ${error}")
@@ -121,11 +124,8 @@ if(NOT "${summary}" STREQUAL "${second}")
 endif()
 # Latency: the buy decided at event #1 (t=0) executes at t=150, after the reset at t=100,
 # so it is cancelled for lack of a trusted book and counted, not silently dropped.
-set(delayed "${reports}/delayed.csv")
-string(REPLACE "config,1000,1000,1000000,1000000,5000000000" "config,1000,1000,1000000,1000000,5000000000,150,0"
-    delayed_config "${config}")
-file(WRITE "${delayed}" "${delayed_config}")
-execute_process(COMMAND "${PROGRAM}" strategy "${SESSION}" "${delayed}" "${reports}/delayed"
+execute_process(COMMAND "${PROGRAM}" strategy "${SESSION}" --config "${SCENARIO}" --report "${reports}/delayed"
+    --set execution.order_latency=150ns
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 file(READ "${reports}/delayed-summary.csv" summary)
 file(READ "${reports}/delayed-orders.csv" orders)
@@ -142,10 +142,9 @@ if(NOT orders MATCHES ",150,150,no_trusted_book,no trusted book at execution tim
 endif()
 # Holding BTC without any trusted bid: unrealized PnL is unavailable, not guessed.
 set(no_quotes "${reports}/no-quotes.csv")
-set(holding "${reports}/holding.csv")
 file(WRITE "${no_quotes}" "tickforge,3,BINANCE_SPOT,BTCUSDT,price_scale=100,quantity_scale=100000000\nreset,1,0,0,0,connecting\nend,1\n")
-file(WRITE "${holding}" "tickforge-orders,1,BTCUSDT\naccount,0,100000,10000000\nconfig,1000,1000,1000000,1000000,5000000000\nthreshold,10000,10200,200000,1000000000\n")
-execute_process(COMMAND "${PROGRAM}" strategy "${no_quotes}" "${holding}" "${reports}/held"
+execute_process(COMMAND "${PROGRAM}" strategy "${no_quotes}" --config "${SCENARIO}" --report "${reports}/held"
+    --set account.usdt=0 --set account.btc=0.001 --set account.btc_cost=0.1
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 file(READ "${reports}/held-summary.csv" summary)
 if(NOT "${result}" STREQUAL "0" OR NOT summary MATCHES "mark_price_atoms,\nmark_event_ordinal,\nmarket_value_quote_atoms,\nunrealized_pnl_quote_atoms,\ntotal_pnl_quote_atoms,\nequity_quote_atoms,\n")

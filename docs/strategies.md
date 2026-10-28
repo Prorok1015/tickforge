@@ -3,14 +3,14 @@
 Run from the repository root with your actual executable path:
 
 ```sh
-out/build/wsl-live-local/tickforge strategy examples/threshold-market.csv examples/threshold-config.csv
+out/build/wsl-live-local/tickforge strategy examples/threshold-market.csv --config examples/threshold.toml
 ```
 
 In Visual Studio, use a WSL startup item with the same target/working directory as
 paper trading and these arguments:
 
 ```json
-"args": ["strategy", "examples/threshold-market.csv", "examples/threshold-config.csv"]
+"args": ["strategy", "examples/threshold-market.csv", "--config", "examples/threshold.toml"]
 ```
 
 This is a deterministic teaching example. Thresholds are experimental inputs,
@@ -52,25 +52,27 @@ assembles these components; changing a strategy does not change the ledger.
 
 ## Configuration
 
-The configuration reuses the versioned account/risk settings from the
-[paper scenario format](paper-trading.md). Instead of scripted `order` rows it has
-exactly one fourth row:
+The [TOML config](paper-trading.md#config-file-toml-version-1) uses the same
+`[account]` and `[execution]` tables as scripted experiments. Instead of
+`[[orders]]` it has one `[strategy]` table (`examples/threshold.toml`):
 
-```text
-tickforge-orders,1,BTCUSDT
-account,10000000000,0
-config,1000,1000,1000000,1000000,5000000000
-threshold,10000,10200,200000,1000000000
+```toml
+[strategy]
+type = "threshold"
+buy_below = "100.00"   # buy when the best ask is at or below
+sell_above = "102.00"  # sell when the best bid is at or above
+quantity = "0.002"     # BTC per request
+buy_budget = "10"      # USDT per buy, including fees
+stop_loss = "0%"       # optional, default 0% (off)
+cooldown = "0s"        # optional, default 0s; requires a stop-loss
 ```
 
-The threshold fields are `buy_price_atoms,sell_price_atoms,quantity_atoms,buy_budget_quote_atoms[,stop_loss_ppm[,cooldown_ns]]`.
-Prices are integer hundredths of USDT; BTC quantities and USDT budgets use 1e-8
-units. The example means buy when ask <= 100.00 USDT, sell when bid >= 102.00 USDT,
+The example means buy when ask <= 100.00 USDT, sell when bid >= 102.00 USDT,
 request 0.002 BTC, and spend at most 10 USDT per buy including fees. Buy price must
 be positive and below sell price. Quantity must be positive and aligned with the
-execution quantity step; budget must be positive. Risk limits still apply.
-The `paper` command rejects threshold configurations, and `strategy` rejects
-scripted scenarios. Mixing the two kinds of rows is invalid.
+execution quantity step; budget must be positive. Risk limits still apply. Any value
+can be varied per run, for example `--set strategy.stop_loss=0.2%`. The `paper`
+command rejects a `[strategy]` table, and `strategy` requires one.
 
 When flat, the policy proposes a buy at or below the threshold. When holding BTC,
 it proposes a sale at or above the other threshold, capped by the configured lot,
@@ -88,12 +90,12 @@ price drop the policy holds BTC indefinitely.
 
 ## Stop-loss
 
-The optional fifth threshold field `stop_loss_ppm` (0 or absent disables it) exits a
+The optional `stop_loss` percentage (`"0%"` or absent disables it) exits a
 losing position. When held BTC valued at the best executable bid is at least that
 far below its cost basis, the policy sells the position at market:
 
 ```text
-held BTC * bid <= cost basis * (1 - stop_loss_ppm / 1000000)
+held BTC * bid <= cost basis * (1 - stop_loss)
 ```
 
 The limit rounds up, so rounding never delays the stop. The stop takes priority over
@@ -112,14 +114,14 @@ Two consequences matter when choosing the value:
   event while ask <= the buy threshold. A stop close to the entry price turns a
   sideways market into repeated buy/stop round trips, each paying two fees.
 
-On a private 15-minute BTCUSDT recording with 0.1% fees, a 1000 ppm stop without a
+On a private 15-minute BTCUSDT recording with 0.1% fees, a 0.1% stop without a
 cooldown produced dozens of such round trips and lost tens of USDT on a 0.01 BTC lot,
-while a 2000 ppm stop triggered rarely. Recordings are not in Git; the effect is
+while a 0.2% stop triggered rarely. Recordings are not in Git; the effect is
 reproduced by the synthetic CLI test, where the policy stops out and immediately rebuys.
 
 ## Cooldown after a stop-loss
 
-The optional sixth threshold field `cooldown_ns` pauses new **buys** after a stop-loss
+The optional `cooldown` duration pauses new **buys** after a stop-loss
 exit. It requires a stop-loss; a cooldown without one is rejected because it would
 silently do nothing. Design choices:
 
@@ -140,7 +142,7 @@ silently do nothing. Design choices:
   that executed the stop, the pause starts one event after the fill.
 
 The journal prints `Cooldown | event #N | ... no buys until elapsed=T ns`. On the same
-private recordings, a 30 or 120 second cooldown cut the 1000 ppm stop's round trips
+private recordings, a 30 or 120 second cooldown cut the 0.1% stop's round trips
 several times and reduced its loss accordingly. The results remained negative: the
 cooldown limits repeated entries but cannot make a stop narrower than fee plus spread
 useful. It does not top up

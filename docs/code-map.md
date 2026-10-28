@@ -10,6 +10,8 @@ tickforge/
   CMakeLists.txt                    project options and subdirectories
   CMakePresets.json                 shared Windows / Linux / WSL build profiles
   cmake/ProjectOptions.cmake        compiler capability check and warnings helper
+  third_party/
+    tomlplusplus/                  INTERFACE target tomlplusplus: vendored toml++ v3.4.0 header (MIT)
   src/
     CMakeLists.txt                  component build order
     core/                          library: tickforge_core
@@ -46,7 +48,7 @@ tickforge/
       replay_command.cpp           replay command
       capture_command.cpp          capture command / disabled-feature error
       paper_command.cpp            offline paper trading command
-      paper_scenario.*             scheduled requests/configuration parser
+      paper_scenario.*             TOML experiment config, overrides, schema checks
       paper_reporter.*             virtual-order/account journal
       paper_export.*               machine-readable order/fill/summary CSV reports
   tests/
@@ -216,11 +218,12 @@ liquidity counters. `order_manager.hpp/.cpp` performs
 risk checks, reserves funds, and submits; `collect()` later validates confirmed
 results and commits them to the account.
 
-The app's `paper_command.cpp` connects these pieces; `paper_scenario.*` reads
+The app's `paper_command.cpp` connects these pieces; `paper_scenario.*` reads the
+TOML config (with `--set` overrides) into atoms using `core/units`,
 experimental inputs, `paper_reporter.*` prints the operation journal, and
 `paper_export.*` optionally writes the CSV reports. No new
 network or console dependency is introduced into the ledger/execution libraries.
-See [paper trading](paper-trading.md) for units, scenario syntax, assumptions,
+See [paper trading](paper-trading.md) for units, config syntax, assumptions,
 example balances, PnL rules, and failure behavior.
 
 `strategy/strategy.hpp` defines a decision interface returning an optional market
@@ -230,7 +233,7 @@ virtual consumption. `threshold.hpp/.cpp` implements an inventory-aware buy/sell
 threshold policy that never sells below its fee-adjusted cost basis. The
 app's existing `paper_command.cpp` also assembles the `strategy` command, invoking
 the policy after each simulator update and before submitting through OrderManager.
-`paper_scenario.*` validates either scripted orders or a threshold configuration.
+`paper_scenario.*` validates either scripted `[[orders]]` or a `[strategy]` table.
 See [strategies](strategies.md) for the event-flow diagram, input units, assumptions,
 and a synthetic partial-buy/recovery/sell example. Strategy does not link execution,
 console, or the Binance adapter; it cannot execute its own proposals.

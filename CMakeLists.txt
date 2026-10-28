@@ -9,6 +9,7 @@ option(TICKFORGE_ENABLE_LIVE "Build public Binance depth capture (Boost, OpenSSL
 include(cmake/ProjectOptions.cmake)
 include(CTest)
 
+add_subdirectory(third_party)
 add_subdirectory(src)
 if(BUILD_TESTING)
     add_subdirectory(tests)

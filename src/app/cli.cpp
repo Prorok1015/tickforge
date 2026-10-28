@@ -5,7 +5,9 @@
 #include <charconv>
 #include <cstdio>
 #include <format>
+#include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 
 namespace tickforge::app {
@@ -14,11 +16,32 @@ void usage(std::string_view program, std::FILE* stream = stdout)
 {
     write_console(std::format(
         "Usage     | {} replay SESSION\n"
-        "Paper     | {} paper SESSION SCENARIO [REPORT_PREFIX]\n"
-        "Strategy  | {} strategy SESSION CONFIG [REPORT_PREFIX]\n"
-        "Reports   | REPORT_PREFIX-orders.csv, -fills.csv, -summary.csv (new files only)\n"
+        "Paper     | {} paper SESSION --config FILE.toml [--set KEY=VALUE]... [--report PREFIX]\n"
+        "Strategy  | {} strategy SESSION --config FILE.toml [--set KEY=VALUE]... [--report PREFIX]\n"
+        "Overrides | --set strategy.stop_loss=0.3% replaces one config value (repeatable)\n"
+        "Reports   | PREFIX-orders.csv, -fills.csv, -summary.csv (new files only)\n"
         "Capture   | {} capture NEW_SESSION [SECONDS] (requires live-enabled build)\n",
         program, program, program, program), stream);
+}
+
+// paper/strategy arguments after the command name. nullopt means a usage error.
+std::optional<PaperOptions> paper_options(int argc, char* argv[], bool automatic)
+{
+    if (argc < 3 || std::string_view(argv[2]).starts_with("--")) return std::nullopt;
+    PaperOptions options;
+    options.automatic = automatic;
+    options.session = argv[2];
+    for (int i = 3; i < argc; ++i) {
+        const std::string_view flag = argv[i];
+        if (i + 1 == argc) return std::nullopt; // every flag takes a value
+        const std::string value = argv[++i];
+        if (flag == "--config" && options.config.empty()) options.config = value;
+        else if (flag == "--report" && options.report_prefix.empty()) options.report_prefix = value;
+        else if (flag == "--set") options.overrides.push_back(value);
+        else return std::nullopt;
+    }
+    if (options.config.empty()) return std::nullopt;
+    return options;
 }
 
 unsigned duration(std::string_view text)
@@ -41,10 +64,13 @@ int dispatch(int argc, char* argv[])
         replay_session(argv[2]);
     } else if (std::string_view(argv[1]) == "capture" && (argc == 3 || argc == 4)) {
         capture_session(argv[2], argc == 4 ? duration(argv[3]) : 30);
-    } else if (std::string_view(argv[1]) == "paper" && (argc == 4 || argc == 5)) {
-        paper_session(argv[2], argv[3], false, argc == 5 ? argv[4] : "");
-    } else if (std::string_view(argv[1]) == "strategy" && (argc == 4 || argc == 5)) {
-        paper_session(argv[2], argv[3], true, argc == 5 ? argv[4] : "");
+    } else if (const std::string_view command = argv[1]; command == "paper" || command == "strategy") {
+        const auto options = paper_options(argc, argv, command == "strategy");
+        if (!options) {
+            usage(program, stderr);
+            return 2;
+        }
+        paper_session(*options);
     } else {
         usage(program, stderr);
         return 2;

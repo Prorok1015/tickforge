@@ -108,10 +108,12 @@ void PaperExport::complete(std::string_view command, std::string_view session, s
     std::vector<std::pair<std::string, std::string>> rows;
     const auto add = [&](std::string key, auto value) { rows.emplace_back(std::move(key), std::format("{}", value)); };
     add("format", "tickforge-paper-summary");
-    add("version", 2);
+    add("version", 3);
     add("command", command);
     add("session", csv(session));
-    add("scenario", csv(scenario_path));
+    add("config", csv(scenario_path));
+    // Values below are the effective ones, after these overrides were applied.
+    add("overrides", csv(overrides_text(scenario.overrides)));
     add("instrument", "BTCUSDT");
     add("price_scale", 100);
     add("quantity_scale", 100000000);

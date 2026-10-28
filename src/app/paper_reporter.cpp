@@ -42,11 +42,19 @@ void balances(const accounting::Balances& balance)
 }
 }
 
+std::string overrides_text(const std::vector<std::string>& overrides)
+{
+    if (overrides.empty()) return "none";
+    std::string text;
+    for (const auto& assignment : overrides) text += (text.empty() ? "" : "; ") + assignment;
+    return text;
+}
+
 void paper_header(std::string_view session, std::string_view scenario, const PaperScenario& settings)
 {
     write_console(std::format(
         "tickforge | Paper trading (offline, virtual funds only)\n"
-        "Market    | {}\nScenario  | {}\n"
+        "Market    | {}\nConfig    | {}\nOverrides | {}\n"
         "Execution | market orders, unfilled remainder cancelled\n"
         "Latency   | order={} ns (decision -> execution) | report={} ns (execution -> confirmed result)\n"
         "Fee       | {} ppm in USDT (configured assumption, not a live venue fee)\n"
@@ -54,7 +62,7 @@ void paper_header(std::string_view session, std::string_view scenario, const Pap
         "Liquidity | consumed virtually; only explicit level updates or snapshots replenish it\n"
         "Initial   | {} USDT | {} BTC | BTC cost basis={} USDT\n"
         "PnL       | average cost; buy fees in cost, sell fees in proceeds; marked at last trusted bid\n\n",
-        session, scenario, settings.config.order_latency_ns, settings.config.report_latency_ns, settings.config.fee_ppm,
+        session, scenario, overrides_text(settings.overrides), settings.config.order_latency_ns, settings.config.report_latency_ns, settings.config.fee_ppm,
         quantity_text(settings.config.max_order_quantity_atoms), quantity_text(settings.config.max_position_quantity_atoms),
         quantity_text(settings.config.quantity_step_atoms), settings.config.stale_after_ns,
         money(settings.initial_quote_atoms), quantity_text(settings.initial_base_atoms),

@@ -1,0 +1,70 @@
+# Scripted paper experiment for examples/synthetic-book.csv.
+# Decimals are strings: TOML floats are binary approximations, money is exact.
+version = 1
+
+[account]
+usdt = "1000"
+
+[execution]
+fee = "0.1%"                # taker fee, an assumption rather than a live venue tier
+quantity_step = "0.00001"   # BTC
+max_order = "0.01"          # BTC per request
+max_position = "0.01"       # BTC held plus pending buys
+stale_after = "5s"
+# order_latency = "50ms"    # decision -> execution (default 0s)
+# report_latency = "50ms"   # execution -> confirmed result (default 0s)
+
+# Each order is sent right after the market event with this ordinal.
+[[orders]]
+after_event = 1
+id = 1
+side = "buy"
+quantity = "0.003"
+max_spend = "300"           # USDT budget including fees
+
+[[orders]]
+after_event = 1
+id = 2
+side = "buy"
+quantity = "0.003"
+max_spend = "300"
+
+[[orders]]
+after_event = 1
+id = 3
+side = "buy"
+quantity = "0.003"
+max_spend = "100"
+
+[[orders]]
+after_event = 2
+id = 4
+side = "buy"
+quantity = "0.001"
+max_spend = "100"
+
+[[orders]]
+after_event = 3
+id = 5
+side = "sell"
+quantity = "0.002"
+
+[[orders]]
+after_event = 4
+id = 6
+side = "buy"
+quantity = "0.001"
+max_spend = "100"
+
+[[orders]]
+after_event = 6
+id = 7
+side = "buy"
+quantity = "0.001"
+max_spend = "100"
+
+[[orders]]
+after_event = 8
+id = 8
+side = "sell"
+quantity = "0.001"

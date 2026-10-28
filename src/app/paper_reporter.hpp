@@ -9,6 +9,8 @@ namespace tickforge::app {
 // Last best bid observed while execution was available: the valuation price.
 struct Mark { std::int64_t price_atoms; std::int64_t ordinal; };
 
+// "k=v; k=v" in command-line order, or "none".
+std::string overrides_text(const std::vector<std::string>& overrides);
 void paper_header(std::string_view session, std::string_view scenario, const PaperScenario& config);
 void paper_market(const MarketEvent& event, bool available);
 void paper_order(const execution::OrderReport& report);

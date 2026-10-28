@@ -9,7 +9,9 @@ recording, and order book code form `tickforge_core`. Console presentation has i
 own library, and the optional Binance adapter owns its network dependencies. Each
 production target has a matching directory and local `CMakeLists.txt`; see the
 [code map](code-map.md).
-Ninja is a convenient optional build backend. Start without downloaded dependencies.
+Ninja is a convenient optional build backend. Start without downloaded dependencies;
+the only third-party code in the default build is the vendored single-header toml++
+used for experiment configs.
 
 Console text is assembled with `std::format` and written with checked stdio calls;
 this retains C++20 rather than requiring C++23 `std::print`. CMake verifies that the

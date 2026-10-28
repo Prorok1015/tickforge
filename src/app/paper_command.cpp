@@ -27,12 +27,14 @@ std::string_view signal_name(strategy::Signal signal)
 }
 } // namespace
 
-void paper_session(std::string_view session_path, std::string_view scenario_path, bool automatic,
-                   std::string_view report_prefix)
+void paper_session(const PaperOptions& options)
 {
-    const auto scenario = load_paper_scenario(scenario_path);
+    const std::string_view session_path = options.session, scenario_path = options.config;
+    const std::string_view report_prefix = options.report_prefix;
+    const bool automatic = options.automatic;
+    const auto scenario = load_paper_scenario(scenario_path, options.overrides);
     if (automatic != scenario.strategy.has_value())
-        throw std::runtime_error("strategy command requires a threshold row; paper command requires scripted orders");
+        throw std::runtime_error("strategy command requires a [strategy] section; paper command requires [[orders]] instead");
     std::optional<strategy::Threshold> algorithm;
     if (scenario.strategy) algorithm.emplace(*scenario.strategy);
     std::ifstream input{std::string(session_path)};

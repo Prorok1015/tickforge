@@ -11,7 +11,7 @@ basis and realized PnL; the report adds unrealized PnL at the last trusted bid.
 From the repository root after building:
 
 ```sh
-./build/tickforge paper examples/synthetic-book.csv examples/paper-orders.csv
+./build/tickforge paper examples/synthetic-book.csv --config examples/paper-orders.toml
 ```
 
 Use the path of your actual build, such as `out/build/wsl-live-local/tickforge`.
@@ -20,7 +20,7 @@ dependencies or a network connection. For Visual Studio, set these arguments and
 keep the repository root as the working directory:
 
 ```json
-"args": ["paper", "examples/synthetic-book.csv", "examples/paper-orders.csv"]
+"args": ["paper", "examples/synthetic-book.csv", "--config", "examples/paper-orders.toml"]
 ```
 
 The entirely synthetic example starts with 1000 USDT and no BTC. It submits eight
@@ -43,11 +43,11 @@ stdout to a local log if you want to save the human-readable operation journal.
 
 ## Machine-readable reports
 
-Both `paper` and `strategy` accept an optional report prefix:
+Both `paper` and `strategy` accept an optional `--report PREFIX`:
 
 ```sh
 mkdir -p reports
-./build/tickforge paper examples/synthetic-book.csv examples/paper-orders.csv reports/example
+./build/tickforge paper examples/synthetic-book.csv --config examples/paper-orders.toml --report reports/example
 ```
 
 This writes three CSV files next to the console journal. All values are integers in
@@ -57,7 +57,7 @@ the units below (price 1e-2 USDT, BTC and USDT amounts 1e-8); no decimals are fo
 | --- | --- |
 | `PREFIX-orders.csv` | One per request, including rejections, in report order: submitting event and time, order, signal (`script`, `buy`, `take_profit`, `stop_loss`), side, request, status, filled/remaining quantity, fills, fees, balances, cost basis, and realized PnL after the report, execution and report times (empty for requests rejected before execution), interruption (`none`, `no_trusted_book`, `session_ended`), then the reason. |
 | `PREFIX-fills.csv` | One per confirmed fill: submitting event and time, order, fill ID, side, price, quantity, notional, fee, execution time. |
-| `PREFIX-summary.csv` | `key,value` rows: format and version (currently 2), inputs (session, scenario, account, every execution parameter including latencies, strategy parameters, units), counts including cancelled in-flight orders, final balances and PnL, mark, and `status,complete` last. |
+| `PREFIX-summary.csv` | `key,value` rows: format and version (currently 3), inputs (session, config path, overrides, account, every execution parameter including latencies, strategy parameters, units), counts including cancelled in-flight orders, final balances and PnL, mark, and `status,complete` last. |
 
 Rules that keep experiments comparable and honest:
 
@@ -98,7 +98,7 @@ flowchart LR
 - `tickforge_execution` owns the execution interface, simulator, and order manager.
   It depends on accounting and core. The simulator itself does not change balances;
   the manager feeds confirmed fills into the ledger.
-- The app reads a scenario, connects replay to the simulator, submits scheduled
+- The app reads a TOML config, connects replay to the simulator, submits scheduled
   requests, and prints journal entries and final balances.
 
 The account is a starting point for reuse with future real execution reports. It
@@ -109,26 +109,81 @@ asynchronous: `submit` hands over an order, and its confirmed terminal result is
 delivered once, later, through `take_reports`. The manager commits only such results;
 an unknown or inconsistent report keeps reservations and aborts the run.
 
-## Scenario file v1
+## Config file (TOML, version 1)
 
-```text
-tickforge-orders,1,BTCUSDT
-account,initial_quote_atoms,initial_base_atoms[,initial_base_cost_quote_atoms]
-config,fee_ppm,quantity_step_atoms,max_order_quantity_atoms,max_position_quantity_atoms,stale_after_ns[,order_latency_ns,report_latency_ns]
-order,after_event_ordinal,order_id,buy_or_sell,quantity_atoms,max_spend_quote_atoms
+An experiment is described in [TOML](https://toml.io/en/v1.0.0), read with the
+vendored single-header [toml++](https://github.com/marzer/tomlplusplus) v3.4.0
+(`third_party/tomlplusplus`, MIT). See `examples/paper-orders.toml` and
+`examples/threshold.toml`.
+
+```toml
+version = 1
+
+[account]
+usdt = "1000"          # required
+btc = "0"              # optional, default 0
+btc_cost = "0"         # total USDT cost of the initial BTC; required when btc > 0
+
+[execution]
+fee = "0.1%"           # required
+quantity_step = "0.00001"
+max_order = "0.01"
+max_position = "0.01"
+stale_after = "5s"
+order_latency = "0s"   # optional, see Latency
+report_latency = "0s"  # optional
+
+[[orders]]             # repeated; or a [strategy] table, never both
+after_event = 1        # send right after this market event ordinal
+id = 1
+side = "buy"           # "buy" or "sell"
+quantity = "0.003"     # BTC
+max_spend = "300"      # USDT budget including fees; buys only
 ```
 
-The optional fourth `account` field is the total cost of the initial BTC in
-1e-8 USDT. It is required when the account starts with BTC and must be absent or
-zero otherwise, so inherited inventory never receives an implicit zero cost.
-The two optional latency fields of `config` come together; absent means zero (see
-[Latency](#latency)).
-The first three rows are mandatory and ordered. Subsequent order rows are processed
-in file order; event ordinals must be positive and nondecreasing, and order IDs must
-be positive and unique. All numeric fields contain nonnegative int64 decimal digits.
-CRLF/LF and a final line without a newline are accepted. Comments, whitespace,
-fractions, unknown fields, and integer overflow are rejected. Invalid order size,
-budget, and risk limits produce a rejected request in the journal where applicable.
+Values are written in human units and converted to integer atoms exactly:
+
+| Kind | Written as | Stored as |
+| --- | --- | --- |
+| Price | `"81000.50"` (at most 2 decimals) | 1e-2 USDT |
+| BTC quantity | `"0.00001"` (at most 8 decimals) | 1e-8 BTC |
+| USDT amount | `"300"`, `"0.1"` (at most 8 decimals) | 1e-8 USDT |
+| Percent | `"0.1%"` (at most 4 decimals, % required) | parts per million |
+| Duration | `"100ns"`, `"250us"`, `"50ms"`, `"1.5s"`, `"2min"` (unit required) | nanoseconds |
+
+Rules that keep a typo or an approximation from changing an experiment silently:
+
+- **Decimals are strings.** A TOML float such as `quantity = 0.01` is a binary
+  approximation and is rejected with a hint. Plain integers (`usdt = 1000`) are fine.
+- **No rounding.** More decimals than the unit holds, signs, exponents, a missing
+  unit or `%`, and overflow are errors.
+- **Unknown keys are errors**, so `stop_los = "1%"` cannot leave the stop disabled.
+- Errors name the key, for example `config orders[2].max_spend: is required`; TOML
+  syntax errors give the line and column.
+
+Initial BTC needs an explicit cost so that selling inherited inventory never shows a
+fictitious profit. Orders run in file order; `after_event` must be positive and
+nondecreasing, and IDs positive and unique. A sell has no `max_spend`. Invalid order
+size, budget, and risk limits produce a rejected request in the journal.
+
+### Command line and overrides
+
+```sh
+./build/tickforge paper SESSION --config FILE.toml [--set KEY=VALUE]... [--report PREFIX]
+./build/tickforge strategy SESSION --config FILE.toml [--set KEY=VALUE]... [--report PREFIX]
+```
+
+`--set` replaces or adds one value by dotted key, for example
+`--set execution.order_latency=50ms` or `--set strategy.stop_loss=0.3%`. Overrides
+are applied in command-line order (a later one wins) before validation, so they obey
+the same rules as file values. Only single values inside tables can be set; tables
+and the `[[orders]]` list cannot. A missing `--config`, an unknown flag, or a flag
+without a value prints usage and exits with code 2; an invalid config exits with 1.
+
+The console header and the report summary record the config path, the overrides,
+and every effective value after overriding, so a result can be reproduced from the
+summary alone. The `paper` command requires `[[orders]]` (possibly none) and rejects
+`[strategy]`; the `strategy` command requires `[strategy]`.
 
 Orders are dispatched **after** applying the referenced market event and **before**
 reading the next event. Multiple orders at the same ordinal see each other's
@@ -148,8 +203,8 @@ console output; only `Paper complete` and a successful exit confirm completion.
 | Fee rate | Parts per million; 1000 ppm = 0.1% |
 | Simulation time and stale threshold | Monotonic session nanoseconds |
 
-For example, `account,100000000000,0` initializes 1000 USDT and zero BTC. A buy
-budget of `30000000000` reserves at most 300 USDT including commissions.
+For example, `usdt = "1000"` initializes 100000000000 quote atoms. A buy budget of
+`max_spend = "300"` reserves at most 30000000000 atoms (300 USDT) including commissions.
 
 For each price-level fill, the quote amount is `price_atoms * quantity_atoms / 100`.
 Buy notional rounds up; sell notional rounds down. The fee is
@@ -257,7 +312,7 @@ The ledger uses the **average cost** method for the single BTC position:
   exact remaining cost, so no rounding residue survives a closed position.
 - Realized PnL changes only on sales: proceeds after the sale fee minus removed cost.
   It is therefore net of both commissions of a round trip.
-- Initial BTC requires an explicit cost in the scenario `account` row.
+- Initial BTC requires an explicit `account.btc_cost`.
 
 The cost is stored as a total in 1e-8 USDT rather than as an average price, so
 partial sales do not accumulate price-rounding error. The journal prints the

@@ -1,0 +1,22 @@
+# Threshold strategy experiment for examples/threshold-market.csv.
+# Decimals are strings: TOML floats are binary approximations, money is exact.
+version = 1
+
+[account]
+usdt = "100"
+
+[execution]
+fee = "0.1%"
+quantity_step = "0.00001"
+max_order = "0.01"
+max_position = "0.01"
+stale_after = "5s"
+
+[strategy]
+type = "threshold"
+buy_below = "100.00"     # buy when the best ask is at or below this price
+sell_above = "102.00"    # sell when the best bid is at or above, never below cost plus fee
+quantity = "0.002"       # BTC per request
+buy_budget = "10"        # USDT per buy, including fees
+stop_loss = "0%"         # sell at market once the position is this far below cost; 0% = off
+cooldown = "0s"          # no buys for this long after a stop-loss exit; requires a stop-loss

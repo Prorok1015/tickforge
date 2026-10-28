@@ -28,7 +28,7 @@ Target capabilities (see the checked roadmap for implemented parts):
 - Produce an execution journal and a session summary.
 - Measure processing latency and investigate bottlenecks on Linux.
 
-The default replay build uses C++20, CMake, and CTest without external libraries. Optional public capture uses Boost.Beast, OpenSSL, and nlohmann/json. Binance Spot BTCUSDT is selected for the first adapter. See [first implementation steps](docs/first-steps.md) for rationale, alternatives, and data-access limitations.
+The default build uses C++20, CMake, and CTest without system libraries; TOML experiment configs are read with the vendored single-header toml++ (`third_party/`). Optional public capture uses Boost.Beast, OpenSSL, and nlohmann/json. Binance Spot BTCUSDT is selected for the first adapter. See [first implementation steps](docs/first-steps.md) for rationale, alternatives, and data-access limitations.
 
 See the [code map](docs/code-map.md) for target directories, file responsibilities,
 and dependency/data-flow diagrams. Each production target owns a directory and a
@@ -243,7 +243,7 @@ the repository root.
 Run the complete virtual-account example (works in native Windows and Linux builds):
 
 ```sh
-./build/tickforge paper examples/synthetic-book.csv examples/paper-orders.csv
+./build/tickforge paper examples/synthetic-book.csv --config examples/paper-orders.toml
 ```
 
 It starts with 1000 virtual USDT and finishes with **609.20148650 USDT and 0.006 BTC**,
@@ -252,12 +252,13 @@ trusted bid (65000.00), the result is **-0.79851350 USDT**: -0.39757401 realized
 -0.40093949 unrealized. In Visual Studio, use:
 
 ```json
-"args": ["paper", "examples/synthetic-book.csv", "examples/paper-orders.csv"]
+"args": ["paper", "examples/synthetic-book.csv", "--config", "examples/paper-orders.toml"]
 ```
 
-Add a report prefix such as `reports/example` after the scenario to also write
-machine-readable order, fill, and summary CSV files. See [paper trading](docs/paper-trading.md)
-for scenario units, fee rounding, report files, liquidity assumptions, and the separate
+Add `--report reports/example` to also write machine-readable order, fill, and
+summary CSV files, and `--set execution.fee=0.075%` (repeatable) to override a config
+value without editing the file. See [paper trading](docs/paper-trading.md)
+for the config format, units, fee rounding, report files, liquidity assumptions, and the separate
 accounting/execution components.
 
 For a release build, use a separate directory:
